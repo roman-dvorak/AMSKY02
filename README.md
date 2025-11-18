@@ -33,7 +33,7 @@ To purchase AMSKY01 or for more information, contact us at **info@astrometers.eu
 
 ## Communication Protocol
 
-AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data messages start with `$` prefix.
+AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data messages start with `$` prefix. Lines starting with `#` are comments/debug messages for human readability and should be ignored by parsing software.
 
 ### Startup Messages
 
@@ -45,6 +45,8 @@ AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data m
 #
 $HELO,AMSKY01A,<fw_version>,<git_hash>,<git_branch>
 ```
+
+The `$HELO` message contains structured device identification for automated parsing.
 
 ### Data Output (every 2 seconds)
 
