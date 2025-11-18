@@ -6,6 +6,7 @@
 #include "version.h"
 #include "sqm_utils.h"
 #include "amsky01_utils.h"
+#include "config.h"
 
 // Firmware and hardware version info
 #define DEVICE_NAME "AMSKY01A"
@@ -26,6 +27,8 @@ AMS_TSL2591 amsSensor;
 // Initialize MLX90641 thermal sensor
 MLX90641 mlxSensor;
 
+// Initialize configuration manager
+ConfigManager configManager;
 
 // Variables for LEDs
 bool trigger_led_state = false;
@@ -57,11 +60,76 @@ static void processSerialCommand(const char *cmd)
     thrmap_streaming = false;
     Serial.println("# thrmap streaming OFF");
   }
+  else if (strcmp(cmd, "config_show") == 0)
+  {
+    configManager.printConfig();
+  }
+  else if (strcmp(cmd, "config_save") == 0)
+  {
+    configManager.save();
+  }
+  else if (strcmp(cmd, "config_reset") == 0)
+  {
+    configManager.reset();
+  }
+  else if (strncmp(cmd, "set ", 4) == 0)
+  {
+    // Parse "set <param> <value>" commands
+    const char* params = cmd + 4;
+    char param[32];
+    char value[32];
+    
+    if (sscanf(params, "%s %s", param, value) == 2)
+    {
+      if (strcmp(param, "sqm_offset") == 0) {
+        configManager.setSqmOffset(atof(value));
+        Serial.print("# Set sqm_offset = "); Serial.println(value);
+      }
+      else if (strcmp(param, "sqm_multiplier") == 0) {
+        configManager.setSqmMultiplier(atof(value));
+        Serial.print("# Set sqm_multiplier = "); Serial.println(value);
+      }
+      else if (strcmp(param, "alert_enabled") == 0) {
+        configManager.setAlertEnabled(atoi(value));
+        Serial.print("# Set alert_enabled = "); Serial.println(value);
+      }
+      else if (strcmp(param, "alert_cloud_temp") == 0) {
+        configManager.setAlertCloudTempThreshold(atof(value));
+        Serial.print("# Set alert_cloud_temp = "); Serial.println(value);
+      }
+      else if (strcmp(param, "alert_cloud_below") == 0) {
+        configManager.setAlertCloudBelow(atoi(value));
+        Serial.print("# Set alert_cloud_below = "); Serial.println(value);
+      }
+      else if (strcmp(param, "alert_light_lux") == 0) {
+        configManager.setAlertLightThreshold(atof(value));
+        Serial.print("# Set alert_light_lux = "); Serial.println(value);
+      }
+      else if (strcmp(param, "alert_light_above") == 0) {
+        configManager.setAlertLightAbove(atoi(value));
+        Serial.print("# Set alert_light_above = "); Serial.println(value);
+      }
+      else if (strcmp(param, "device_label") == 0) {
+        configManager.setDeviceLabel(value);
+        Serial.print("# Set device_label = "); Serial.println(value);
+      }
+      else {
+        Serial.print("# Unknown parameter: "); Serial.println(param);
+      }
+    }
+    else {
+      Serial.println("# Invalid set command format. Use: set <param> <value>");
+    }
+  }
+  else
+  {
+    Serial.print("# Unknown command: "); Serial.println(cmd);
+  }
 }
 
 static void handleSerialCommands()
 {
-  static char buf[32];
+  static char buf[64];
   static uint8_t pos = 0;
 
   while (Serial.available() > 0)
@@ -158,6 +226,10 @@ void setup() {
   } else {
     // MLX sensor is not available
   }
+  
+  // Initialize configuration manager
+  configManager.begin();
+  configManager.printConfig();
 }
 
 void loop() {
