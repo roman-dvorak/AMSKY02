@@ -8,6 +8,11 @@
 #include "amsky01_utils.h"
 #include "config.h"
 
+// RP2040 bootloader reset function
+extern "C" {
+  void reset_usb_boot(uint32_t usb_activity_gpio_mask, uint32_t disable_interface_mask);
+}
+
 // Firmware and hardware version info
 #define DEVICE_NAME "AMSKY01A"
 #define FW_VERSION BUILD_VERSION
@@ -48,6 +53,14 @@ const unsigned long MEASUREMENT_INTERVAL = 2000; // 2 seconds
 // Režim posílání celé IR mapy po UARTu
 bool thrmap_streaming = false;
 
+// Enter UF2 bootloader mode
+static void enterUf2Bootloader() {
+  Serial.println("# Entering UF2 bootloader mode...");
+  Serial.flush();
+  delay(100);
+  reset_usb_boot(0, 0);  // Reset to UF2 bootloader in ROM
+}
+
 static void processSerialCommand(const char *cmd)
 {
   if (strcmp(cmd, "thrmap_on") == 0)
@@ -71,6 +84,10 @@ static void processSerialCommand(const char *cmd)
   else if (strcmp(cmd, "config_reset") == 0)
   {
     configManager.reset();
+  }
+  else if (strcmp(cmd, "bootloader") == 0)
+  {
+    enterUf2Bootloader();
   }
   else if (strncmp(cmd, "set ", 4) == 0)
   {
