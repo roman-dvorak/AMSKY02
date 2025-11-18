@@ -85,9 +85,11 @@ $cloud_meta,<vdd>,<ta>
 - `vdd` - Sensor supply voltage
 - `ta` - Ambient temperature from thermal sensor
 
-### Optional Commands
+### Serial Commands
 
-Send via serial to enable/disable thermal map streaming:
+Send commands via serial (115200 baud) to configure the device:
+
+**Thermal Map:**
 - `thrmap_on` - Enable full 16×12 thermal map output
 - `thrmap_off` - Disable thermal map output
 
@@ -96,6 +98,19 @@ When enabled, device outputs:
 $thrmap,<pixel0>,<pixel1>,...,<pixel191>
 ```
 192 temperature values in °C (16×12 array)
+
+**Configuration (requires config.h integration in firmware):**
+- `config_show` - Display current configuration
+- `config_save` - Save current configuration to EEPROM
+- `config_reset` - Reset configuration to defaults
+- `set sqm_offset <value>` - Set SQM calibration offset
+- `set sqm_multiplier <value>` - Set SQM multiplier
+- `set alert_enabled <0|1>` - Enable/disable alert output
+- `set alert_cloud_temp <value>` - Set cloud temperature threshold (°C)
+- `set alert_cloud_below <0|1>` - Alert when temp < threshold (1) or > threshold (0)
+- `set alert_light_lux <value>` - Set light threshold (lux)
+- `set alert_light_above <0|1>` - Alert when lux > threshold (1) or < threshold (0)
+- `set device_label <text>` - Set custom device label
 
 ## Firmware
 
