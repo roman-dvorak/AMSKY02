@@ -5,6 +5,7 @@
 #include "MLX90641.h"
 #include "version.h"
 #include "sqm_utils.h"
+#include "amsky01_utils.h"
 
 // Firmware and hardware version info
 #define DEVICE_NAME "AMSKY01A"
@@ -95,9 +96,14 @@ void setup() {
   digitalWrite(CPU_STATUS_LED, LOW);
   digitalWrite(TRIGGER_OUT_LED, LOW);
   
+  // Get device serial number
+  String serial_number = getDeviceSerialNumber();
+  
   // Print device information
   Serial.print("# ");
   Serial.println(DEVICE_NAME);
+  Serial.print("# Serial Number: ");
+  Serial.println(serial_number);
   Serial.print("# FW Version: ");
   Serial.println(FW_VERSION);
   Serial.print("# Git Hash: ");
@@ -107,9 +113,11 @@ void setup() {
   Serial.println("#");
   
   // Send structured HELO message with device identification
-  // Format: $HELO,<device_name>,<fw_version>,<git_hash>,<git_branch>
+  // Format: $HELO,<device_name>,<serial_number>,<fw_version>,<git_hash>,<git_branch>
   Serial.print("$HELO,");
   Serial.print(DEVICE_NAME);
+  Serial.print(",");
+  Serial.print(serial_number);
   Serial.print(",");
   Serial.print(FW_VERSION);
   Serial.print(",");
