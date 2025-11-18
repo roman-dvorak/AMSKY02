@@ -4,10 +4,10 @@
 #include "AMS_TSL2591.h"
 #include "MLX90641.h"
 #include "version.h"
+#include "sqm_utils.h"
 
 // Firmware and hardware version info
-#define DEVICE_NAME "AFSKY01 Hygrometer"
-#define HW_VERSION "1.0"
+#define DEVICE_NAME "AMSKY01A"
 #define FW_VERSION BUILD_VERSION
 
 // Pin definitions
@@ -41,7 +41,46 @@ bool tsl_available = false;
 unsigned long last_measurement = 0;
 const unsigned long MEASUREMENT_INTERVAL = 2000; // 2 seconds
 
+// Režim posílání celé IR mapy po UARTu
+bool thrmap_streaming = false;
 
+static void processSerialCommand(const char *cmd)
+{
+  if (strcmp(cmd, "thrmap_on") == 0)
+  {
+    thrmap_streaming = true;
+    Serial.println("# thrmap streaming ON");
+  }
+  else if (strcmp(cmd, "thrmap_off") == 0)
+  {
+    thrmap_streaming = false;
+    Serial.println("# thrmap streaming OFF");
+  }
+}
+
+static void handleSerialCommands()
+{
+  static char buf[32];
+  static uint8_t pos = 0;
+
+  while (Serial.available() > 0)
+  {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r')
+    {
+      if (pos > 0)
+      {
+        buf[pos] = '\0';
+        processSerialCommand(buf);
+        pos = 0;
+      }
+    }
+    else if (pos < sizeof(buf) - 1)
+    {
+      buf[pos++] = c;
+    }
+  }
+}
 
 void setup() {
   // Initialize serial communication
@@ -57,11 +96,26 @@ void setup() {
   digitalWrite(TRIGGER_OUT_LED, LOW);
   
   // Print device information
+  Serial.print("# ");
   Serial.println(DEVICE_NAME);
-  Serial.print("HW Version: ");
-  Serial.println(HW_VERSION);
-  Serial.print("FW Version: ");
+  Serial.print("# FW Version: ");
   Serial.println(FW_VERSION);
+  Serial.print("# Git Hash: ");
+  Serial.println(GIT_HASH);
+  Serial.print("# Git Branch: ");
+  Serial.println(GIT_BRANCH);
+  Serial.println("#");
+  
+  // Send structured HELO message with device identification
+  // Format: $HELO,<device_name>,<fw_version>,<git_hash>,<git_branch>
+  Serial.print("$HELO,");
+  Serial.print(DEVICE_NAME);
+  Serial.print(",");
+  Serial.print(FW_VERSION);
+  Serial.print(",");
+  Serial.print(GIT_HASH);
+  Serial.print(",");
+  Serial.print(GIT_BRANCH);
   Serial.println();
   
   // Initialize I2C1 with specific pins (GPIO 18=SDA, GPIO 19=SCL)
@@ -77,10 +131,10 @@ void setup() {
     // Set precision and heater
     sht4.setPrecision(SHT4X_HIGH_PRECISION);
     sht4.setHeater(SHT4X_NO_HEATER);
-    Serial.println("SHT4x sensor initialized successfully");
+    Serial.println("# SHT4x sensor initialized successfully");
   } else {
     sht4_available = false;
-    Serial.println("SHT4x sensor initialization failed");
+    Serial.println("# SHT4x sensor initialization failed");
   }
   
   // Initialize AMS TSL2591 light sensor on I2C1
@@ -99,6 +153,9 @@ void setup() {
 }
 
 void loop() {
+  // Zpracuj případné příkazy z UARTu (thrmap_on/thrmap_off)
+  handleSerialCommands();
+
   // Handle CPU status LED PWM breathing effect
   unsigned long current_time = millis();
   float phase = (current_time % CPU_BREATHING_PERIOD) / (float)CPU_BREATHING_PERIOD;
@@ -141,7 +198,11 @@ void loop() {
       const char* integration_time_str;
       
       if (amsSensor.readLightData(normalized_lux, full_raw, ir_raw, gain_str, integration_time_str)) {
-        // Output in CSV format: light,normalized_lux,full_raw,ir_raw,gain,integration_time
+        // Convert normalized_lux to double for SQM calculation
+        double lux_double = (double)normalized_lux;
+        double sqm_value = convert_lux_to_sqm(lux_double);
+        
+        // Output in CSV format: light,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm
         Serial.print("$light,");
         Serial.print(normalized_lux, 2);  // Normalized lux value with 2 decimal places
         Serial.print(",");
@@ -152,6 +213,8 @@ void loop() {
         Serial.print(gain_str); // Current gain setting
         Serial.print(",");
         Serial.print(integration_time_str); // Current integration time setting
+        Serial.print(",");
+        Serial.print(sqm_value, 2); // SQM value in mag/arcsec2 with 2 decimal places
         Serial.println();
       } else {
         // Settings were adjusted, skip this measurement
@@ -179,27 +242,23 @@ void loop() {
         Serial.print(corners[3], 2); Serial.print(","); // BR
         Serial.print(center, 2);                         // CTR
         Serial.println();
+
+        // Volitelné: celá teplotní mapa (16x12 = 192 hodnot) v °C
+        if (thrmap_streaming) {
+          const float *map = mlxSensor.getTemperatureMap();
+          if (map != nullptr) {
+            Serial.print("$thrmap");
+            for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
+              Serial.print(i == 0 ? "," : ",");
+              Serial.print(map[i], 2);
+            }
+            Serial.println();
+          }
+        }
       }
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-last_measurement = current_time;
+    last_measurement = current_time;
   }
 
   delay(10); // Small delay to prevent busy waiting

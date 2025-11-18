@@ -16,14 +16,14 @@ bool AMS_TSL2591::begin(TwoWire *wire) {
         tsl.setGain(current_gain);
         tsl.setTiming(TSL2591_INTEGRATIONTIME_300MS);
         
-        Serial.println("TSL2591 light sensor initialized successfully");
-        Serial.print("Initial gain: ");
+        Serial.println("# TSL2591 light sensor initialized successfully");
+        Serial.print("# Initial gain: ");
         Serial.println(getGainString(current_gain));
         
         return true;
     }
     
-    Serial.println("TSL2591 light sensor initialization failed");
+    Serial.println("# TSL2591 light sensor initialization failed");
     return false;
 }
 

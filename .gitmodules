@@ -6,4 +6,4 @@
 	url = git@github.com:melexis/mlx90641-library.git
 [submodule "fw/src/mlx90641-library"]
 	path = fw/src/mlx90641-library
-	url = git@github.com:melexis/mlx90641-library.git
+	url = https://github.com/melexis/mlx90641-library.git

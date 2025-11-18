@@ -27,9 +27,30 @@ def get_git_branch():
     except:
         return "unknown"
 
+def get_release_version():
+    try:
+        # Try to get the latest git tag (release version)
+        result = subprocess.run(['git', 'describe', '--tags', '--exact-match', 'HEAD'], 
+                              capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__)))
+        if result.returncode == 0:
+            # We are on a tagged commit (release)
+            return result.stdout.strip()
+        else:
+            # Not on a tagged commit, use git hash
+            return None
+    except:
+        return None
+
 def main():
     git_hash = get_git_hash()
     git_branch = get_git_branch()
+    release_version = get_release_version()
+    
+    # Determine build version: use release tag if available, otherwise use git hash
+    if release_version:
+        build_version = release_version
+    else:
+        build_version = git_hash
     
     # Generate version header
     version_content = f"""#ifndef VERSION_H
@@ -37,7 +58,7 @@ def main():
 
 #define GIT_HASH "{git_hash}"
 #define GIT_BRANCH "{git_branch}"
-#define BUILD_VERSION "{git_hash}"
+#define BUILD_VERSION "{build_version}"
 
 #endif // VERSION_H
 """
@@ -49,7 +70,7 @@ def main():
     with open(os.path.join(include_dir, "version.h"), "w") as f:
         f.write(version_content)
     
-    print(f"Generated version.h with hash: {git_hash}")
+    print(f"Generated version.h with version: {build_version} (hash: {git_hash}, branch: {git_branch})")
 
 if __name__ == "__main__":
     main()
