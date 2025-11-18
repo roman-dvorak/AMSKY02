@@ -28,9 +28,10 @@ struct DeviceConfig {
     bool alert_enabled;       // Enable/disable alert output
     bool alert_on_cloud;      // Trigger alert on cloud detection
     float alert_cloud_temp_threshold;  // Cloud temperature threshold (°C)
+    bool alert_cloud_below;   // true = alert when temp < threshold, false = alert when temp > threshold
     bool alert_on_light;      // Trigger alert on high light (dawn/lights)
     float alert_light_threshold;  // Light threshold in lux for alert
-    bool alert_active_high;   // true = alert HIGH when triggered, false = alert LOW
+    bool alert_light_above;   // true = alert when lux > threshold, false = alert when lux < threshold
     
     // Measurement intervals (milliseconds)
     uint16_t measurement_interval;  // Default: 2000 ms
@@ -72,10 +73,11 @@ private:
         // Alert defaults
         config.alert_enabled = false;
         config.alert_on_cloud = true;
-        config.alert_cloud_temp_threshold = -10.0;  // Alert if sky temp < -10°C (clouds)
+        config.alert_cloud_temp_threshold = -10.0;  // Cloud temperature threshold
+        config.alert_cloud_below = true;   // Alert when sky temp < threshold (warmer = clouds)
         config.alert_on_light = true;
-        config.alert_light_threshold = 10.0;  // Alert if light > 10 lux (dawn/lights)
-        config.alert_active_high = true;  // HIGH = alert active
+        config.alert_light_threshold = 10.0;  // Light threshold
+        config.alert_light_above = true;   // Alert when light > threshold (dawn/lights)
         
         // Timing defaults
         config.measurement_interval = 2000;
@@ -137,9 +139,10 @@ public:
     bool isAlertEnabled() { return config.alert_enabled; }
     bool isAlertOnCloud() { return config.alert_on_cloud; }
     float getAlertCloudTempThreshold() { return config.alert_cloud_temp_threshold; }
+    bool isAlertCloudBelow() { return config.alert_cloud_below; }
     bool isAlertOnLight() { return config.alert_on_light; }
     float getAlertLightThreshold() { return config.alert_light_threshold; }
-    bool isAlertActiveHigh() { return config.alert_active_high; }
+    bool isAlertLightAbove() { return config.alert_light_above; }
     uint16_t getMeasurementInterval() { return config.measurement_interval; }
     const char* getDeviceLabel() { return config.device_label; }
     
@@ -151,9 +154,10 @@ public:
     void setAlertEnabled(bool value) { config.alert_enabled = value; }
     void setAlertOnCloud(bool value) { config.alert_on_cloud = value; }
     void setAlertCloudTempThreshold(float value) { config.alert_cloud_temp_threshold = value; }
+    void setAlertCloudBelow(bool value) { config.alert_cloud_below = value; }
     void setAlertOnLight(bool value) { config.alert_on_light = value; }
     void setAlertLightThreshold(float value) { config.alert_light_threshold = value; }
-    void setAlertActiveHigh(bool value) { config.alert_active_high = value; }
+    void setAlertLightAbove(bool value) { config.alert_light_above = value; }
     void setMeasurementInterval(uint16_t value) { config.measurement_interval = value; }
     void setDeviceLabel(const char* label) { 
         strncpy(config.device_label, label, sizeof(config.device_label) - 1);
@@ -169,10 +173,9 @@ public:
         Serial.print("# Cloud Threshold: "); Serial.println(config.cloud_threshold, 2);
         Serial.print("# Alert Enabled: "); Serial.println(config.alert_enabled ? "YES" : "NO");
         Serial.print("# Alert on Cloud: "); Serial.println(config.alert_on_cloud ? "YES" : "NO");
-        Serial.print("# Alert Cloud Temp Threshold: "); Serial.print(config.alert_cloud_temp_threshold, 2); Serial.println(" °C");
+        Serial.print("# Alert Cloud Temp Threshold: "); Serial.print(config.alert_cloud_temp_threshold, 2); Serial.print(" °C "); Serial.println(config.alert_cloud_below ? "(below)" : "(above)");
         Serial.print("# Alert on Light: "); Serial.println(config.alert_on_light ? "YES" : "NO");
-        Serial.print("# Alert Light Threshold: "); Serial.print(config.alert_light_threshold, 2); Serial.println(" lux");
-        Serial.print("# Alert Active High: "); Serial.println(config.alert_active_high ? "YES" : "NO");
+        Serial.print("# Alert Light Threshold: "); Serial.print(config.alert_light_threshold, 2); Serial.print(" lux "); Serial.println(config.alert_light_above ? "(above)" : "(below)");
         Serial.print("# Measurement Interval: "); Serial.print(config.measurement_interval); Serial.println(" ms");
         Serial.print("# Device Label: "); Serial.println(config.device_label);
         Serial.println("# ============================");
