@@ -2,10 +2,10 @@
 
 Zobrazuje:
 - IR mapu z MLX90641 ($thrmap)
-- Ta/Vdd z MLX90641 ($thr_parameters)
+- Ta/Vdd z MLX90641 ($cloud_meta)
 - rohy/střed z MLX90641 ($cloud)
 - teplotu a vlhkost ze SHT4x ($hygro)
-- osvětlení z TSL2591 ($light)
+- osvětlení z TSL2591 ($light) včetně SQM
 
 Závislosti:
     pip install pyserial numpy pyqtgraph PyQt5
@@ -47,28 +47,29 @@ def parse_thrmap(line: str):
 
 
 def parse_hygro(line: str):
-    """$hygro,<temp>,<humidity>"""
+    """$hygro,<temp>,<humidity>,<dew_point>"""
     line = line.strip()
     if not line.startswith("$hygro,"):
         return None
     parts = line.split(",")
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None
     try:
         temp = float(parts[1])
         rh = float(parts[2])
+        dew_point = float(parts[3])
     except ValueError:
         return None
-    return temp, rh
+    return temp, rh, dew_point
 
 
 def parse_light(line: str):
-    """$light,normalized_lux,full_raw,ir_raw,gain,integration_time"""
+    """$light,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm"""
     line = line.strip()
     if not line.startswith("$light,"):
         return None
     parts = line.split(",")
-    if len(parts) < 6:
+    if len(parts) < 7:
         return None
     try:
         lux = float(parts[1])
@@ -76,15 +77,16 @@ def parse_light(line: str):
         ir_raw = float(parts[3])
         gain = parts[4]
         itime = parts[5]
+        sqm = float(parts[6])
     except ValueError:
         return None
-    return lux, full_raw, ir_raw, gain, itime
+    return lux, full_raw, ir_raw, gain, itime, sqm
 
 
-def parse_thr_parameters(line: str):
-    """$thr_parameters,<vdd>,<ta>"""
+def parse_cloud_meta(line: str):
+    """$cloud_meta,<vdd>,<ta>"""
     line = line.strip()
-    if not line.startswith("$thr_parameters,"):
+    if not line.startswith("$cloud_meta,"):
         return None
     parts = line.split(",")
     if len(parts) < 3:
@@ -117,11 +119,13 @@ def parse_cloud(line: str):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, ser: serial.Serial, vmin=None, vmax=None, parent=None):
+    def __init__(self, ser: serial.Serial, vmin=None, vmax=None, debug=False, parent=None):
         super().__init__(parent)
         self.ser = ser
         self.vmin = vmin
         self.vmax = vmax
+        self.debug = debug
+        self.line_buffer = ""  # Buffer pro neúplné řádky
 
         self.setWindowTitle("AMSKY01 / MLX90641 vizualizátor")
 
@@ -167,8 +171,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # Hygro
         self.lbl_temp = make_label()
         self.lbl_rh = make_label()
+        self.lbl_dew = make_label()
         form.addRow("SHT4x T [°C]", self.lbl_temp)
         form.addRow("SHT4x RH [%]", self.lbl_rh)
+        form.addRow("Dew Point [°C]", self.lbl_dew)
 
         # Light
         self.lbl_lux = make_label()
@@ -176,11 +182,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lbl_ir = make_label()
         self.lbl_gain = make_label()
         self.lbl_itime = make_label()
+        self.lbl_sqm = make_label()
         form.addRow("Lux", self.lbl_lux)
         form.addRow("TSL full", self.lbl_full)
         form.addRow("TSL IR", self.lbl_ir)
         form.addRow("TSL gain", self.lbl_gain)
         form.addRow("TSL int", self.lbl_itime)
+        form.addRow("SQM [mag/arcsec²]", self.lbl_sqm)
 
         # IR senzor parametry
         self.lbl_vdd = make_label()
@@ -210,12 +218,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def poll_serial(self):
         try:
-            # Čti všechny dostupné řádky
+            # Čti všechny dostupné data
             while self.ser.in_waiting:
-                line = self.ser.readline().decode(errors="ignore")
-                if not line:
+                chunk = self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+                if not chunk:
                     break
-                self.process_line(line)
+                
+                # Přidej do bufferu
+                self.line_buffer += chunk
+                
+                # Zpracuj kompletní řádky
+                while "\n" in self.line_buffer:
+                    line, self.line_buffer = self.line_buffer.split("\n", 1)
+                    if self.debug:
+                        print(f"< {line}")
+                    self.process_line(line + "\n")
         except serial.SerialException as e:
             print(f"Serial error: {e}")
 
@@ -233,24 +250,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.startswith("$hygro,"):
             v = parse_hygro(s)
             if v is not None:
-                t, rh = v
+                t, rh, dew = v
                 self.lbl_temp.setText(f"{t:.2f}")
                 self.lbl_rh.setText(f"{rh:.2f}")
+                self.lbl_dew.setText(f"{dew:.2f}")
             return
 
         if s.startswith("$light,"):
             v = parse_light(s)
             if v is not None:
-                lux, full_raw, ir_raw, gain, itime = v
+                lux, full_raw, ir_raw, gain, itime, sqm = v
                 self.lbl_lux.setText(f"{lux:.2f}")
                 self.lbl_full.setText(f"{full_raw:.0f}")
                 self.lbl_ir.setText(f"{ir_raw:.0f}")
                 self.lbl_gain.setText(gain)
                 self.lbl_itime.setText(itime)
+                self.lbl_sqm.setText(f"{sqm:.2f}")
             return
 
-        if s.startswith("$thr_parameters,"):
-            v = parse_thr_parameters(s)
+        if s.startswith("$cloud_meta,"):
+            v = parse_cloud_meta(s)
             if v is not None:
                 vdd, ta = v
                 self.lbl_vdd.setText(f"{vdd:.3f}")
@@ -301,6 +320,7 @@ def main():
     parser.add_argument("--baud", type=int, default=115200, help="baudrate (default 115200)")
     parser.add_argument("--vmin", type=float, default=None, help="min. teplota pro barevnou škálu")
     parser.add_argument("--vmax", type=float, default=None, help="max. teplota pro barevnou škálu")
+    parser.add_argument("--debug", action="store_true", help="zobraz všechny zprávy na seriové lince")
 
     args = parser.parse_args()
 
@@ -312,12 +332,15 @@ def main():
 
     # Po startu automaticky zapni režim streamování heatmapy
     try:
-        ser.write(b"thrmap_on\n")
+        cmd = b"thrmap_on\n"
+        ser.write(cmd)
+        if args.debug:
+            print(f"> {cmd.decode().rstrip()}")
     except serial.SerialException:
         pass
 
     app = QtWidgets.QApplication(sys.argv)
-    win = MainWindow(ser, vmin=args.vmin, vmax=args.vmax)
+    win = MainWindow(ser, vmin=args.vmin, vmax=args.vmax, debug=args.debug)
     win.resize(900, 500)
     win.show()
 

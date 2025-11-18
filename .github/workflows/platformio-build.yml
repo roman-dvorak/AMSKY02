@@ -2,7 +2,13 @@ name: PlatformIO CI
 
 on:
   push:
+    paths:
+      - 'fw/**'
+      - '.github/workflows/platformio-build.yml'
   pull_request:
+    paths:
+      - 'fw/**'
+      - '.github/workflows/platformio-build.yml'
   release:
     types: [ created, published ]
   workflow_dispatch:
