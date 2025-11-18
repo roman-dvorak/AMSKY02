@@ -1,8 +1,11 @@
-# AMSKY01
+# AMSKY01: Sky Quality & Cloud Detection Sensor
 
-Sky Quality & Cloud Detection Sensor
+<p align="center">
+  <img width="200" height="200" alt="AstroMeters Logo" src="https://github.com/user-attachments/assets/2135c8e6-5789-47cd-ac9b-e2287eecc98f" />
+</p>
 
-AMSKY01 is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
+
+[AMSKY01](https://astrometers.eu/products/AMSKY01/) is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
 - **Sky Quality Meter (SQM)** - measures sky brightness for light pollution assessment
 - **Cloud Detector** - uses thermal IR sky temperature measurement to detect cloud coverage
 
