@@ -72,5 +72,10 @@ def main():
     
     print(f"Generated version.h with version: {build_version} (hash: {git_hash}, branch: {git_branch})")
 
+Import("env")
+
+# Run before build
+main()
+
 if __name__ == "__main__":
     main()
