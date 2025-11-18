@@ -176,9 +176,9 @@ void setup() {
   Serial.println(GIT_BRANCH);
   Serial.println("#");
   
-  // Send structured HELO message with device identification
-  // Format: $HELO,<device_name>,<serial_number>,<fw_version>,<git_hash>,<git_branch>
-  Serial.print("$HELO,");
+  // Send structured HELLO message with device identification
+  // Format: $HELLO,<device_name>,<serial_number>,<fw_version>,<git_hash>,<git_branch>
+  Serial.print("$HELLO,");
   Serial.print(DEVICE_NAME);
   Serial.print(",");
   Serial.print(serial_number);

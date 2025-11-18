@@ -47,10 +47,10 @@ AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data m
 # Git Hash: <hash>
 # Git Branch: <branch>
 #
-$HELO,AMSKY01A,<serial_number>,<fw_version>,<git_hash>,<git_branch>
+$HELLO,AMSKY01A,<serial_number>,<fw_version>,<git_hash>,<git_branch>
 ```
 
-The `$HELO` message contains structured device identification for automated parsing:
+The `$HELLO` message contains structured device identification for automated parsing:
 - `serial_number` - Unique 16-character hex ID from RP2040 chip (e.g., `E6614103E7452D2F`)
 
 ### Data Output (every 2 seconds)
