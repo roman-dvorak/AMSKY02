@@ -99,18 +99,39 @@ $thrmap,<pixel0>,<pixel1>,...,<pixel191>
 ```
 192 temperature values in °C (16×12 array)
 
-**Configuration (requires config.h integration in firmware):**
+**Configuration:**
+
+Configuration is stored persistently in EEPROM and survives power cycles.
+
 - `config_show` - Display current configuration
 - `config_save` - Save current configuration to EEPROM
-- `config_reset` - Reset configuration to defaults
-- `set sqm_offset <value>` - Set SQM calibration offset
-- `set sqm_multiplier <value>` - Set SQM multiplier
-- `set alert_enabled <0|1>` - Enable/disable alert output
-- `set alert_cloud_temp <value>` - Set cloud temperature threshold (°C)
+- `config_reset` - Reset configuration to factory defaults
+
+**SQM Calibration:**
+- `set sqm_offset <value>` - Set SQM calibration offset (default: 8.5265)
+- `set sqm_multiplier <value>` - Set SQM multiplier (default: -2.5)
+
+**Alert Configuration:**
+
+The device has a hardware alert output (GPIO 27) that can trigger on cloud detection and/or light levels.
+
+- `set alert_enabled <0|1>` - Enable (1) or disable (0) alert output
+- `set alert_cloud_temp <value>` - Cloud temperature threshold in °C (default: -10.0)
 - `set alert_cloud_below <0|1>` - Alert when temp < threshold (1) or > threshold (0)
-- `set alert_light_lux <value>` - Set light threshold (lux)
-- `set alert_light_above <0|1>` - Alert when lux > threshold (1) or < threshold (0)
-- `set device_label <text>` - Set custom device label
+- `set alert_light_lux <value>` - Light threshold in lux (default: 10.0)
+- `set alert_light_above <0|1>` - Alert when light > threshold (1) or < threshold (0)
+
+**Device Settings:**
+- `set device_label <text>` - Set custom device label/location (max 31 chars)
+
+**Example Usage:**
+```
+set alert_enabled 1
+set alert_cloud_temp -15.0
+set alert_cloud_below 1
+config_save
+```
+This enables alerts when sky temperature drops below -15°C (indicating clouds).
 
 ## Firmware
 
