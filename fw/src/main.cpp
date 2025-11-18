@@ -180,14 +180,27 @@ void loop() {
       sensors_event_t humidity, temp;
       
       if (sht4.getEvent(&humidity, &temp)) {
-        // Output in CSV format: hygro,\u003ctemp\u003e,\u003chumid\u003e
+        // Calculate dew point using Magnus formula
+        // Td = (b * alpha) / (a - alpha)
+        // where alpha = (a * T) / (b + T) + ln(RH/100)
+        // a = 17.27, b = 237.7 for temperatures above 0°C
+        float T = temp.temperature;
+        float RH = humidity.relative_humidity;
+        const float a = 17.27;
+        const float b = 237.7;
+        float alpha = ((a * T) / (b + T)) + log(RH / 100.0);
+        float dew_point = (b * alpha) / (a - alpha);
+        
+        // Output in CSV format: hygro,<temp>,<humid>,<dew_point>
         Serial.print("$hygro,");
         Serial.print(temp.temperature, 2);
         Serial.print(",");
         Serial.print(humidity.relative_humidity, 2);
+        Serial.print(",");
+        Serial.print(dew_point, 2);
         Serial.println();
       } else {
-        Serial.println("$hygro,-999,-999");
+        Serial.println("$hygro,-999,-999,-999");
       }
     }
     
@@ -228,7 +241,7 @@ void loop() {
       
       if (mlxSensor.readThermalData(vdd, ta, corners, center)) {
         // Output parameters
-        Serial.print("$thr_parameters,");
+        Serial.print("$cloud_meta,");
         Serial.print(vdd, 3);
         Serial.print(",");
         Serial.print(ta, 3);

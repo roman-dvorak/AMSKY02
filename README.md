@@ -70,14 +70,15 @@ $cloud,<tl>,<tr>,<bl>,<br>,<center>
 
 **Environmental Data:**
 ```
-$hygro,<temperature>,<humidity>
+$hygro,<temperature>,<humidity>,<dew_point>
 ```
 - `temperature` - Ambient temperature in °C
 - `humidity` - Relative humidity in %
+- `dew_point` - Dew point temperature in °C
 
-**Thermal Parameters:**
+**Cloud Sensor Metadata:**
 ```
-$thr_parameters,<vdd>,<ta>
+$cloud_meta,<vdd>,<ta>
 ```
 - `vdd` - Sensor supply voltage
 - `ta` - Ambient temperature from thermal sensor

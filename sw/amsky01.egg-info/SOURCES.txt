@@ -1,0 +1,16 @@
+LICENSE
+MANIFEST.in
+README.md
+pyproject.toml
+requirements.txt
+setup.cfg
+setup.py
+sw/debug_sensor.py
+sw/plot_logs.py
+sw/sensor_viewer.py
+sw/amsky01.egg-info/PKG-INFO
+sw/amsky01.egg-info/SOURCES.txt
+sw/amsky01.egg-info/dependency_links.txt
+sw/amsky01.egg-info/entry_points.txt
+sw/amsky01.egg-info/requires.txt
+sw/amsky01.egg-info/top_level.txt

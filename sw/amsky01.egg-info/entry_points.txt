@@ -1,0 +1,4 @@
+[console_scripts]
+amsky01-debug = debug_sensor:main
+amsky01-plot = plot_logs:main
+amsky01-viewer = sensor_viewer:main

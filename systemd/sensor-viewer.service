@@ -1,0 +1,20 @@
+[Unit]
+Description=AMSKY01 Sensor Viewer Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roman
+Group=roman
+WorkingDirectory=/home/roman/repos/astrometers/AMSKY01/sw
+Environment=HOME=/home/roman
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/bin/python3 sensor_viewer.py --tcp 2000 --no-tui --log
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
