@@ -1,0 +1,101 @@
+name: PlatformIO CI
+
+on:
+  push:
+  pull_request:
+  release:
+    types: [ created, published ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Cache PlatformIO
+      uses: actions/cache@v4
+      with:
+        path: ~/.platformio
+        key: ${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    
+    - name: Install PlatformIO Core
+      run: pip install --upgrade platformio
+    
+    - name: Build PlatformIO Project
+      run: pio run
+      working-directory: ./fw
+    
+    - name: Get firmware info
+      id: fw_info
+      run: |
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        echo "commit_hash=${COMMIT_HASH}" >> $GITHUB_OUTPUT
+        echo "firmware_name=AMSKY01-firmware-dev_build-${COMMIT_HASH}" >> $GITHUB_OUTPUT
+      working-directory: ./fw
+    
+    - name: Upload firmware artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.fw_info.outputs.firmware_name }}
+        path: |
+          fw/.pio/build/**/*.uf2
+          fw/.pio/build/**/*.bin
+          fw/.pio/build/**/*.elf
+        if-no-files-found: error
+    
+    - name: Prepare release assets
+      if: github.event_name == 'release'
+      run: |
+        mkdir -p release
+        cp -r .pio/build/pico/*.uf2 release/ 2>/dev/null || true
+        cp -r .pio/build/pico/*.bin release/ 2>/dev/null || true
+        cp -r .pio/build/pico/*.elf release/ 2>/dev/null || true
+        cd release
+        for file in *; do
+          if [ -f "$file" ]; then
+            mv "$file" "AMSKY01-${GITHUB_REF_NAME}-${file}"
+          fi
+        done
+      working-directory: ./fw
+    
+    - name: Prepare dev build assets
+      if: github.event_name != 'release'
+      run: |
+        mkdir -p release
+        COMMIT_HASH=$(git rev-parse --short HEAD)
+        cp -r .pio/build/pico/*.uf2 release/ 2>/dev/null || true
+        cp -r .pio/build/pico/*.bin release/ 2>/dev/null || true
+        cp -r .pio/build/pico/*.elf release/ 2>/dev/null || true
+        cd release
+        for file in *; do
+          if [ -f "$file" ]; then
+            mv "$file" "AMSKY01-dev_build-${COMMIT_HASH}-${file}"
+          fi
+        done
+      working-directory: ./fw
+    
+    - name: Upload Release Assets
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          fw/release/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
