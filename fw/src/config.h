@@ -26,7 +26,6 @@ struct DeviceConfig {
     
     // Alert/trigger output configuration
     bool alert_enabled;       // Enable/disable alert output
-    uint8_t alert_pin;        // GPIO pin for alert output (default: TRIGGER_OUT_LED)
     bool alert_on_cloud;      // Trigger alert on cloud detection
     float alert_cloud_temp_threshold;  // Cloud temperature threshold (°C)
     bool alert_on_light;      // Trigger alert on high light (dawn/lights)
@@ -72,7 +71,6 @@ private:
         
         // Alert defaults
         config.alert_enabled = false;
-        config.alert_pin = 27;  // TRIGGER_OUT_LED pin
         config.alert_on_cloud = true;
         config.alert_cloud_temp_threshold = -10.0;  // Alert if sky temp < -10°C (clouds)
         config.alert_on_light = true;
@@ -137,7 +135,6 @@ public:
     float getSqmDarkCap() { return config.sqm_dark_cap; }
     float getCloudThreshold() { return config.cloud_threshold; }
     bool isAlertEnabled() { return config.alert_enabled; }
-    uint8_t getAlertPin() { return config.alert_pin; }
     bool isAlertOnCloud() { return config.alert_on_cloud; }
     float getAlertCloudTempThreshold() { return config.alert_cloud_temp_threshold; }
     bool isAlertOnLight() { return config.alert_on_light; }
@@ -152,7 +149,6 @@ public:
     void setSqmDarkCap(float value) { config.sqm_dark_cap = value; }
     void setCloudThreshold(float value) { config.cloud_threshold = value; }
     void setAlertEnabled(bool value) { config.alert_enabled = value; }
-    void setAlertPin(uint8_t value) { config.alert_pin = value; }
     void setAlertOnCloud(bool value) { config.alert_on_cloud = value; }
     void setAlertCloudTempThreshold(float value) { config.alert_cloud_temp_threshold = value; }
     void setAlertOnLight(bool value) { config.alert_on_light = value; }
@@ -172,7 +168,6 @@ public:
         Serial.print("# SQM Dark Cap: "); Serial.println(config.sqm_dark_cap, 2);
         Serial.print("# Cloud Threshold: "); Serial.println(config.cloud_threshold, 2);
         Serial.print("# Alert Enabled: "); Serial.println(config.alert_enabled ? "YES" : "NO");
-        Serial.print("# Alert Pin: GPIO"); Serial.println(config.alert_pin);
         Serial.print("# Alert on Cloud: "); Serial.println(config.alert_on_cloud ? "YES" : "NO");
         Serial.print("# Alert Cloud Temp Threshold: "); Serial.print(config.alert_cloud_temp_threshold, 2); Serial.println(" °C");
         Serial.print("# Alert on Light: "); Serial.println(config.alert_on_light ? "YES" : "NO");
