@@ -38,6 +38,10 @@ jobs:
     - name: Install PlatformIO Core
       run: pip install --upgrade platformio
     
+    - name: Generate version.h
+      run: python3 generate_version.py
+      working-directory: ./fw
+    
     - name: Build PlatformIO Project
       run: pio run
       working-directory: ./fw
