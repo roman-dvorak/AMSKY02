@@ -109,7 +109,9 @@ Configuration is stored persistently in EEPROM and survives power cycles.
 
 **SQM Calibration:**
 - `set sqm_offset <value>` - Set SQM calibration offset (default: 8.5265)
-- `set sqm_multiplier <value>` - Set SQM multiplier (default: -2.5)
+  - This value combines the standard mag zeropoint (12.58) and solid angle correction for the 10° FOV lens
+  - Adjust this value to calibrate against a reference SQM meter
+  - The calculation uses fixed Pogson's ratio (-2.5) from the magnitude scale
 
 **Alert Configuration:**
 

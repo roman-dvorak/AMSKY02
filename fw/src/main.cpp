@@ -85,10 +85,6 @@ static void processSerialCommand(const char *cmd)
         configManager.setSqmOffset(atof(value));
         Serial.print("# Set sqm_offset = "); Serial.println(value);
       }
-      else if (strcmp(param, "sqm_multiplier") == 0) {
-        configManager.setSqmMultiplier(atof(value));
-        Serial.print("# Set sqm_multiplier = "); Serial.println(value);
-      }
       else if (strcmp(param, "alert_enabled") == 0) {
         configManager.setAlertEnabled(atoi(value));
         Serial.print("# Set alert_enabled = "); Serial.println(value);

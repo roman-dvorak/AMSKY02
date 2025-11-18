@@ -18,7 +18,7 @@ struct DeviceConfig {
     
     // SQM calibration parameters
     float sqm_offset;         // Offset for SQM calculation (default: 8.5265)
-    float sqm_multiplier;     // Multiplier for SQM calculation (default: -2.5)
+    // Note: sqm_multiplier is always -2.5 (Pogson's ratio) and not configurable
     float sqm_dark_cap;       // Maximum SQM value for dark sky (default: 23.0)
     
     // Cloud sensor parameters
@@ -63,8 +63,7 @@ private:
         config.version = CONFIG_VERSION;
         
         // SQM defaults
-        config.sqm_offset = 8.5265;
-        config.sqm_multiplier = -2.5;
+        config.sqm_offset = 8.5265;  // Calculated for 10° FOV: 12.58 + 2.5*log10(Omega)
         config.sqm_dark_cap = 23.0;
         
         // Cloud sensor defaults
@@ -133,7 +132,6 @@ public:
     
     // Getters
     float getSqmOffset() { return config.sqm_offset; }
-    float getSqmMultiplier() { return config.sqm_multiplier; }
     float getSqmDarkCap() { return config.sqm_dark_cap; }
     float getCloudThreshold() { return config.cloud_threshold; }
     bool isAlertEnabled() { return config.alert_enabled; }
@@ -148,7 +146,6 @@ public:
     
     // Setters
     void setSqmOffset(float value) { config.sqm_offset = value; }
-    void setSqmMultiplier(float value) { config.sqm_multiplier = value; }
     void setSqmDarkCap(float value) { config.sqm_dark_cap = value; }
     void setCloudThreshold(float value) { config.cloud_threshold = value; }
     void setAlertEnabled(bool value) { config.alert_enabled = value; }
@@ -168,7 +165,6 @@ public:
     void printConfig() {
         Serial.println("# === Current Configuration ===");
         Serial.print("# SQM Offset: "); Serial.println(config.sqm_offset, 4);
-        Serial.print("# SQM Multiplier: "); Serial.println(config.sqm_multiplier, 4);
         Serial.print("# SQM Dark Cap: "); Serial.println(config.sqm_dark_cap, 2);
         Serial.print("# Cloud Threshold: "); Serial.println(config.cloud_threshold, 2);
         Serial.print("# Alert Enabled: "); Serial.println(config.alert_enabled ? "YES" : "NO");
