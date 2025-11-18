@@ -24,6 +24,67 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY01 integrates easily into 
 * Sky monitoring networks for astronomy research
 * Citizen science projects
 
+## Communication Protocol
+
+AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data messages start with `$` prefix.
+
+### Startup Messages
+
+```
+# AMSKY01A
+# FW Version: <version>
+# Git Hash: <hash>
+# Git Branch: <branch>
+#
+$HELO,AMSKY01A,<fw_version>,<git_hash>,<git_branch>
+```
+
+### Data Output (every 2 seconds)
+
+**Sky Quality (SQM) Data:**
+```
+$light,<lux>,<full_raw>,<ir_raw>,<gain>,<integration_time>,<sqm>
+```
+- `lux` - Normalized lux value (2 decimal places)
+- `full_raw` - Raw full spectrum sensor reading
+- `ir_raw` - Raw infrared sensor reading
+- `gain` - Current sensor gain setting
+- `integration_time` - Current integration time
+- `sqm` - Sky quality in mag/arcsec² (2 decimal places)
+
+**Cloud Detection Data:**
+```
+$cloud,<tl>,<tr>,<bl>,<br>,<center>
+```
+- `tl`, `tr`, `bl`, `br` - Corner temperatures in °C (top-left, top-right, bottom-left, bottom-right)
+- `center` - Center sky temperature in °C
+
+**Environmental Data:**
+```
+$hygro,<temperature>,<humidity>
+```
+- `temperature` - Ambient temperature in °C
+- `humidity` - Relative humidity in %
+
+**Thermal Parameters:**
+```
+$thr_parameters,<vdd>,<ta>
+```
+- `vdd` - Sensor supply voltage
+- `ta` - Ambient temperature from thermal sensor
+
+### Optional Commands
+
+Send via serial to enable/disable thermal map streaming:
+- `thrmap_on` - Enable full 16×12 thermal map output
+- `thrmap_off` - Disable thermal map output
+
+When enabled, device outputs:
+```
+$thrmap,<pixel0>,<pixel1>,...,<pixel191>
+```
+192 temperature values in °C (16×12 array)
+
 ## Firmware
 
 Pre-built firmware binaries are available:
