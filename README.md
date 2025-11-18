@@ -20,3 +20,30 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY01 can be easily connected
  * Integration into building management and dome automation systems via RS485.
  * Environmental monitoring for astronomy and meteorological networks.
  * Citizen science and research projects.
+
+## Firmware
+
+### Building
+
+The firmware is built using PlatformIO:
+
+```bash
+cd fw
+pio run
+```
+
+### CI/CD
+
+Firmware is automatically built on every commit using GitHub Actions:
+- **Development builds**: Artifacts are available in the Actions tab with naming `AMSKY01-firmware-dev_build-<commit-hash>`
+- **Release builds**: Firmware binaries are automatically attached to GitHub releases
+
+### Downloading Pre-built Firmware
+
+- **Latest development build**: Check the [Actions tab](../../actions) for the most recent successful build
+- **Stable releases**: Download from the [Releases page](../../releases)
+
+Firmware files:
+- `*.uf2` - Flash by copying to Pico in bootloader mode
+- `*.bin` - Binary for advanced flashing methods
+- `*.elf` - Debug symbols
