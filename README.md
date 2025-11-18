@@ -8,6 +8,9 @@ AMSKY01 is a specialized sensor for astronomers and observatories. It combines t
 
 With both USB (CDC serial) and RS485 interfaces, AMSKY01 integrates easily into observatory automation systems, building management systems, or connects directly to computers for monitoring and data logging.
 
+**Product page:** https://astrometers.eu/products/AMSKY01/  
+**Documentation:** https://astrometers.eu/docs/AMSKY01/
+
 ## Key Features
 
 * **Sky Quality Measurement (SQM)** - Real-time readings in magnitudes per square arcsecond (mag/arcsec²) for objective sky brightness assessment
@@ -23,6 +26,10 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY01 integrates easily into 
 * Integration into observatory automation and building management systems via RS485
 * Sky monitoring networks for astronomy research
 * Citizen science projects
+
+## Where to Get It
+
+To purchase AMSKY01 or for more information, contact us at **info@astrometers.eu**
 
 ## Communication Protocol
 
