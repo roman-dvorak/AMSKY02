@@ -1,83 +1,83 @@
 # AMSKY01 Software Tools
 
-Nástroje pro práci se senzory AMSKY01 (MLX90641, SHT4x, TSL2591).
+Tools for working with AMSKY01 sensors (MLX90641, SHT4x, TSL2591).
 
-## Nástroje pro real-time monitoring
+## Real-time Monitoring Tools
 
 ### `amsky01_viewer.py`
-GUI vizualizátor s PyQt/PyQtGraph pro zobrazení dat v reálném čase:
-- IR teplotní mapa z MLX90641 (12×16 pixelů)
-- Teplota a vlhkost ze SHT4x včetně dew pointu
-- Osvětlení z TSL2591 včetně SQM
-- Parametry senzorů (Vdd, Ta, rohy IR mapy)
+GUI visualizer with PyQt/PyQtGraph for real-time data display:
+- IR thermal map from MLX90641 (12×16 pixels)
+- Temperature and humidity from SHT4x including dew point
+- Light from TSL2591 including SQM
+- Sensor parameters (Vdd, Ta, IR map corners)
 
-**Použití:**
+**Usage:**
 ```bash
 python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200
-python amsky01_viewer.py --port /dev/ttyACM0 --debug  # s výpisem komunikace
+python amsky01_viewer.py --port /dev/ttyACM0 --debug  # with communication output
 ```
 
-**Závislosti:** `pyserial`, `numpy`, `pyqtgraph`, `PyQt5`
+**Dependencies:** `pyserial`, `numpy`, `pyqtgraph`, `PyQt5`
 
 ---
 
 ### `amsky01_cli.py`
-CLI viewer s curses rozhraním + automatické logování do CSV:
-- Real-time zobrazení senzorových dat v terminálu
-- Automatické ukládání dat do CSV souborů
-- Rotace log souborů každých 10 minut
+CLI viewer with curses interface + automatic CSV logging:
+- Real-time sensor data display in terminal
+- Automatic data saving to CSV files
+- Log file rotation every 10 minutes
 
-**Použití:**
+**Usage:**
 ```bash
 python amsky01_cli.py --port /dev/ttyACM0 --baud 115200
 ```
 
-**Závislosti:** `pyserial`, `curses`
+**Dependencies:** `pyserial`, `curses`
 
 ---
 
-## Nástroje pro analýzu logů
+## Log Analysis Tools
 
 ### `plot_logs.py`
-Vykreslování grafů z uložených CSV logů:
-- Podpora více souborů současně
-- Interaktivní režim s auto-refresh
-- Export do PNG
+Plot graphs from saved CSV logs:
+- Support for multiple files simultaneously
+- Interactive mode with auto-refresh
+- Export to PNG
 
-**Použití:**
+**Usage:**
 ```bash
 python plot_logs.py sensor_logs/latest.csv
 python plot_logs.py --interactive --refresh 30 sensor_logs/*.csv
 python plot_logs.py --output myplot.png sensor_logs/data.csv
 ```
 
-**Závislosti:** `pandas`, `matplotlib`, `numpy`
+**Dependencies:** `pandas`, `matplotlib`, `numpy`
 
 ---
 
 ### `plot_latest.sh`
-Bash wrapper pro rychlé vykreslení logů:
+Bash wrapper for quick log plotting:
 ```bash
-./plot_latest.sh              # Vykreslí nejnovější log
-./plot_latest.sh --all        # Vykreslí všechny logy
-./plot_latest.sh specific.csv # Vykreslí konkrétní soubor
+./plot_latest.sh              # Plot latest log
+./plot_latest.sh --all        # Plot all logs
+./plot_latest.sh specific.csv # Plot specific file
 ```
 
 ---
 
-## Formát UART zpráv
+## UART Message Format
 
-Zařízení komunikuje přes UART rychlostí 115200 baud (konfigurovatelné). Zprávy:
+Device communicates via UART at 115200 baud (configurable). Messages:
 
-- `$thrmap,<192 hodnot>` - IR teplotní mapa (12×16 pixelů)
-- `$cloud,<TL>,<TR>,<BL>,<BR>,<CENTER>` - Rohy a střed IR mapy
-- `$cloud_meta,<Vdd>,<Ta>` - Napětí a teplota MLX90641
-- `$hygro,<temp>,<humidity>,<dew_point>` - Teplota, vlhkost, rosný bod
-- `$light,<lux>,<full>,<ir>,<gain>,<int_time>,<sqm>` - Osvětlení a SQM
+- `$thrmap,<192 values>` - IR thermal map (12×16 pixels)
+- `$cloud,<TL>,<TR>,<BL>,<BR>,<CENTER>` - Corners and center of IR map
+- `$cloud_meta,<Vdd>,<Ta>` - Voltage and temperature of MLX90641
+- `$hygro,<temp>,<humidity>,<dew_point>` - Temperature, humidity, dew point
+- `$light,<lux>,<full>,<ir>,<gain>,<int_time>,<sqm>` - Light and SQM
 
 ---
 
-## Instalace závislostí
+## Installing Dependencies
 
 ```bash
 pip install pyserial numpy pyqtgraph PyQt5 pandas matplotlib

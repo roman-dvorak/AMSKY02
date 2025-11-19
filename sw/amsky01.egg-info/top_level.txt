@@ -1,3 +1,0 @@
-debug_sensor
-plot_logs
-sensor_viewer
