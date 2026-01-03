@@ -47,7 +47,7 @@ jobs:
                              libglib2.0-0t64 libgl1 libxcb-cursor0 libxkbcommon-x11-0 \
                              libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
                              libxcb-render-util0 libxcb-shape0 libdbus-1-3 \
-                             libxcb-xinerama0 libxcb-xfixes0 python3-pil \
+                             libxcb-xinerama0 libxcb-xfixes0 python3-pil upx \
                              libgssapi-krb5-2 libkrb5-3 libfontconfig1 libegl1 \
                              libgtk-3-0 libtiff5 libxkbcommon0
           
@@ -64,14 +64,14 @@ jobs:
           pip install pyinstaller
           
           # Vytvoř PyInstaller spec
-          pyinstaller --onefile --windowed \
+          pyinstaller --onefile --windowed --strip \
                       --name amsky01_viewer \
-                      --add-data "sw:sw" \
                       --hidden-import PySide6 \
                       --hidden-import pyqtgraph \
                       --hidden-import numpy \
                       --hidden-import serial \
-                      --hidden-import h5py \
+                      --exclude-module h5py \
+                      --exclude-module pandas --exclude-module matplotlib --exclude-module psutil \
                       sw/amsky01_viewer.py
           
           # Vytvoř AppDir strukturu
@@ -79,8 +79,10 @@ jobs:
           mkdir -p AppDir/usr/share/applications
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           
-          # Zkopíruj executable
+          # Zkopíruj executable a zkus ho ještě zmenšit UPX/strip (best effort)
           cp dist/amsky01_viewer AppDir/usr/bin/
+          strip AppDir/usr/bin/amsky01_viewer || true
+          upx -q AppDir/usr/bin/amsky01_viewer || true
           
           # Zkopíruj desktop file na správné místo (kořen AppDir)
           cp sw/amsky01_viewer.desktop AppDir/
