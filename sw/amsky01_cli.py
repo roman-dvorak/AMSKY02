@@ -44,7 +44,7 @@ class SensorData:
         """Add new sensor data point"""
         with self.lock:
             self.data_count += 1
-            print(f"[DEBUG SensorData] Adding {sensor_type} data: {data}")
+            #print(f"[DEBUG SensorData] Adding {sensor_type} data: {data}")
             
             if sensor_type == 'hygro' and len(data) >= 2:
                 try:
@@ -400,122 +400,8 @@ class DataLogger:
                 print(f"[DataLogger] Error saving data: {e}")
 
 
-class TCPReader:
-    """TCP socket reader in separate thread"""
-    def __init__(self, host, port, sensor_data, data_logger=None):
-        self.host = host
-        self.port = port
-        self.sensor_data = sensor_data
-        self.data_logger = data_logger
-        self.running = False
-        self.thread = None
-        self.socket = None
-        
-    def start(self):
-        """Start reading from TCP socket"""
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.connect((self.host, self.port))
-            self.socket.settimeout(1.0)
-            
-            print(f"TCP connection established to {self.host}:{self.port}")
-            
-            self.running = True
-            self.thread = threading.Thread(target=self._read_loop, daemon=True)
-            self.thread.start()
-            return True
-            
-        except Exception as e:
-            print(f"Error connecting to TCP server: {e}")
-            if self.socket:
-                try:
-                    self.socket.close()
-                except:
-                    pass
-                self.socket = None
-            return False
-            
-    def stop(self):
-        """Stop reading from TCP socket"""
-        self.running = False
-        if self.socket:
-            try:
-                self.socket.close()
-            except:
-                pass
-            
-    def _read_loop(self):
-        """Main TCP reading loop"""
-        buffer = ""
-        consecutive_errors = 0
-        last_data_time = time.time()
-        data_count = 0
-        
-        while self.running:
-            try:
-                # Receive data
-                chunk_bytes = self.socket.recv(1024)
-                
-                if not chunk_bytes:
-                    print("TCP connection closed by server")
-                    break
-                    
-                # Decode data
-                chunk = chunk_bytes.decode('utf-8', errors='ignore')
-                buffer += chunk
-                
-                # Process complete lines
-                while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    line = line.strip()
-                    
-                    if line:
-                        if ',' in line:
-                            parts = line.split(',')
-                            sensor_type_raw = parts[0]
-                            
-                            # Handle $ prefix
-                            if sensor_type_raw.startswith('$'):
-                                sensor_type_raw = sensor_type_raw[1:]
-                            
-                            # Map cloud to thermal
-                            if sensor_type_raw == 'cloud':
-                                sensor_type_raw = 'thermal'
-                                
-                            if len(parts) >= 2 and sensor_type_raw in ['hygro', 'light', 'thermal']:
-                                sensor_type = sensor_type_raw
-                                data = parts[1:]
-                                self.sensor_data.add_data(sensor_type, data)
-                                
-                                # Log to CSV if logger is available
-                                if self.data_logger:
-                                    self.data_logger.log_data_point(sensor_type, data)
-                                
-                                consecutive_errors = 0
-                                data_count += 1
-                                last_data_time = time.time()
-                                print(f"[DEBUG TCPReader] [{data_count:04d}] {sensor_type}: {','.join(data)}")
-                            else:
-                                print(f"Invalid format: {line}")
-                        else:
-                            print(f"Bad data: {line}")
-                    
-            except socket.timeout:
-                # Timeout is normal, continue
-                pass
-            except Exception as e:
-                consecutive_errors += 1
-                if self.running:
-                    print(f"TCP error #{consecutive_errors}: {e}")
-                    if consecutive_errors >= 5:
-                        print("Too many TCP errors, stopping")
-                        self.running = False
-                        break
-                    time.sleep(0.1)
-
-
 class SerialReader:
-    """Serial port reader in separate thread"""
+    """Data reader with connection handling"""
     def __init__(self, port, baudrate, sensor_data, data_logger=None):
         self.port = port
         self.baudrate = baudrate
@@ -526,7 +412,7 @@ class SerialReader:
         self.serial_conn = None
         
     def start(self):
-        """Start reading from serial port with robust connection"""
+        """Start connection with error handling"""
         try:
             # Close any existing connection
             if self.serial_conn and self.serial_conn.is_open:
@@ -574,13 +460,13 @@ class SerialReader:
             return False
             
     def stop(self):
-        """Stop reading from serial port"""
+        """Stop connection"""
         self.running = False
         if self.serial_conn:
             self.serial_conn.close()
             
     def _read_loop(self):
-        """Main reading loop with improved error handling"""
+        """Main data reading loop"""
         consecutive_errors = 0
         last_data_time = time.time()
         data_count = 0
@@ -705,7 +591,7 @@ class SerialReader:
                     time.sleep(0.1)
                     
     def _attempt_reconnect(self):
-        """Attempt to reconnect to serial port"""
+        """Attempt to reconnect"""
         try:
             if self.serial_conn and self.serial_conn.is_open:
                 self.serial_conn.close()
@@ -721,9 +607,9 @@ class SerialReader:
 
 class SimpleCLI:
     """Simple CLI interface without ncurses"""
-    def __init__(self, sensor_data, reader, data_logger=None):
+    def __init__(self, sensor_data, serial_reader, data_logger=None):
         self.sensor_data = sensor_data
-        self.reader = reader
+        self.serial_reader = serial_reader
         self.data_logger = data_logger
         self.running = True
         
@@ -759,10 +645,13 @@ class SimpleCLI:
             # Hygro data
             hygro = self.sensor_data.latest['hygro']
             if hygro['temp'] is not None:
-                print(f"Temperature: {hygro['temp']:.1f}°C")
-                print(f"Humidity: {hygro['humid']:.1f}%")
+                temp = float(hygro['temp']) if isinstance(hygro['temp'], str) else hygro['temp']
+                humid = float(hygro['humid']) if isinstance(hygro['humid'], str) else hygro['humid']
+                print(f"Temperature: {temp:.1f}°C")
+                print(f"Humidity: {humid:.1f}%")
                 if hygro['dew_point'] is not None:
-                    print(f"Dew Point: {hygro['dew_point']:.1f}°C")
+                    dew = float(hygro['dew_point']) if isinstance(hygro['dew_point'], str) else hygro['dew_point']
+                    print(f"Dew Point: {dew:.1f}°C")
             else:
                 print("Temperature: No data")
             
@@ -776,7 +665,8 @@ class SimpleCLI:
             # Thermal data
             thermal = self.sensor_data.latest['thermal']
             if thermal['center'] is not None:
-                print(f"Thermal Center: {thermal['center']:.1f}°C")
+                center = float(thermal['center']) if isinstance(thermal['center'], str) else thermal['center']
+                print(f"Thermal Center: {center:.1f}°C")
             else:
                 print("Thermal: No data")
             
@@ -786,8 +676,7 @@ class SimpleCLI:
             print(f"Runtime: {runtime:.0f}s, Data points: {self.sensor_data.data_count}, Rate: {data_rate:.1f}/s")
             
             if self.data_logger:
-                print(f"Logging: {self.data_logger.filename if hasattr(self.data_logger, 'filename') else 'Active'}")
-
+                print(f"Logging: {os.path.basename(self.data_logger.current_file) if self.data_logger.current_file else 'No file'}")
 
 class CLIInterface:
     """ncurses-based CLI interface"""
@@ -969,8 +858,181 @@ class CLIInterface:
 
 
 
+
+class TCPReader:
+    """Data reader with connection handling"""
+    def __init__(self, host, port, sensor_data, data_logger=None):
+        self.host = host
+        self.port = port
+        self.sensor_data = sensor_data
+        self.data_logger = data_logger
+        self.running = False
+        self.thread = None
+        self.socket = None
+        
+    def start(self):
+        """Start connection with error handling"""
+        try:
+            # Close existing connection
+            if self.socket:
+                try:
+                    self.socket.close()
+                except:
+                    pass
+                time.sleep(0.5)
+            
+            # Create TCP connection
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(5.0)
+            self.socket.connect((self.host, self.port))
+            self.socket.settimeout(1.0)
+            
+            self.running = True
+            self.thread = threading.Thread(target=self._read_loop, daemon=True)
+            self.thread.start()
+            return True
+            
+        except Exception as e:
+            print(f"TCP connection error: {e}")
+            if self.socket:
+                try:
+                    self.socket.close()
+                except:
+                    pass
+                self.socket = None
+            return False
+            
+    def stop(self):
+        """Stop connection"""
+        self.running = False
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+            
+    def _read_loop(self):
+        """Main data reading loop"""
+        consecutive_errors = 0
+        last_data_time = time.time()
+        data_count = 0
+        buffer = ""
+        reconnect_attempts = 0
+        max_reconnect_attempts = 5
+        
+        while self.running:
+            try:
+                if self.socket:
+                    try:
+                        # Read data
+                        chunk_bytes = self.socket.recv(1024)
+                        
+                        # Handle connection close
+                        if not chunk_bytes:
+                            consecutive_errors += 1
+                            if consecutive_errors >= 3:
+                                self._attempt_reconnect()
+                                consecutive_errors = 0
+                                reconnect_attempts += 1
+                                if reconnect_attempts >= max_reconnect_attempts:
+                                    self.running = False
+                                    break
+                            time.sleep(0.1)
+                            continue
+                        
+                        # Decode received data
+                        chunk = chunk_bytes.decode('utf-8', errors='ignore')
+                        buffer += chunk
+                        
+                        # Process data lines
+                        while '\n' in buffer:
+                            line, buffer = buffer.split('\n', 1)
+                            line = line.strip()
+                            
+                            if line and ',' in line:
+                                parts = line.split(',')
+                                # Remove $ prefix
+                                sensor_type_raw = parts[0]
+                                if sensor_type_raw.startswith('$'):
+                                    sensor_type_raw = sensor_type_raw[1:]
+                                
+                                # Map cloud -> thermal
+                                if sensor_type_raw == 'cloud':
+                                    sensor_type_raw = 'thermal'
+                                
+                                if len(parts) >= 2 and sensor_type_raw in ['hygro', 'light', 'thermal']:
+                                    sensor_type = sensor_type_raw
+                                    data = parts[1:]
+                                    self.sensor_data.add_data(sensor_type, data)
+                                    
+                                    # Log data if enabled
+                                    if self.data_logger:
+                                        self.data_logger.log_data_point(sensor_type, data)
+                                    
+                                    consecutive_errors = 0
+                                    reconnect_attempts = 0
+                                    data_count += 1
+                                    last_data_time = time.time()
+                                else:
+                                    print(f"Invalid format: {line}")
+                            elif line and len(line) > 3:
+                                print(f"Bad data: {line}")
+                                
+                    except socket.timeout:
+                        # Normal timeout
+                        pass
+                        
+                    # Check for data timeout
+                    if time.time() - last_data_time > 10.0:
+                        print("No data for 10s, checking connection")
+                        last_data_time = time.time()
+                    
+                    time.sleep(0.05)  # Prevent CPU spinning
+                else:
+                    print("TCP connection lost")
+                    break
+                    
+            except socket.error:
+                consecutive_errors += 1
+                if self.running:
+                    if consecutive_errors >= 3:
+                        self._attempt_reconnect()
+                        consecutive_errors = 0
+                        reconnect_attempts += 1
+                        if reconnect_attempts >= max_reconnect_attempts:
+                            self.running = False
+                            break
+                    time.sleep(0.5)
+            except UnicodeDecodeError:
+                buffer = ""  # Clear corrupted buffer
+            except Exception:
+                consecutive_errors += 1
+                if self.running:
+                    if consecutive_errors >= 5:
+                        self.running = False
+                        break
+                    time.sleep(0.1)
+                    
+    def _attempt_reconnect(self):
+        """Attempt to reconnect"""
+        try:
+            if self.socket:
+                try:
+                    self.socket.close()
+                except:
+                    pass
+            time.sleep(1)  # Wait before reconnect
+            
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(5.0)
+            self.socket.connect((self.host, self.port))
+            self.socket.settimeout(1.0)
+        except Exception:
+            self.socket = None
+
+
 def list_serial_ports():
-    """List all available serial ports"""
+    """List available serial ports"""
     try:
         import serial.tools.list_ports as list_ports
         ports = list_ports.comports()
@@ -991,20 +1053,20 @@ def list_serial_ports():
 
 
 def main():
-    """Main function"""
+    """Application entry point"""
     parser = argparse.ArgumentParser(description='AMSKY01 Sensor Data Viewer')
     parser.add_argument('--port', '-p', default='/dev/ttyACM0', 
                         help='Serial port (default: /dev/ttyACM0)')
     parser.add_argument('--baudrate', '-b', type=int, default=115200,
-                        help='Baudrate (default: 115200)')
-    parser.add_argument('--log', action='store_true',
-                        help='Enable CSV data logging to sensor_logs/ directory')
+                        help='Serial baudrate (default: 115200)')
     parser.add_argument('--tcp', type=int, metavar='PORT',
                         help='TCP port (uses localhost, replaces serial)')
     parser.add_argument('--host', default='localhost',
                         help='TCP host (default: localhost)')
+    parser.add_argument('--log', action='store_true',
+                        help='Enable CSV logging')
     parser.add_argument('--list-ports', '-l', action='store_true',
-                        help='List available serial ports and exit')
+                        help='List serial ports and exit')
     parser.add_argument('--no-tui', action='store_true',
                         help='Disable ncurses TUI, use simple CLI output')
     
@@ -1015,10 +1077,16 @@ def main():
         list_serial_ports()
         sys.exit(0)
     
-    # Check CLI availability - only required for TUI mode
+    # Check CLI availability (only needed for ncurses TUI)
     if not args.no_tui and not CLI_AVAILABLE:
-        print("Error: curses not available. Use --no-tui for simple CLI mode.")
+        print("Error: curses not available. Use --no-tui for simple CLI interface.")
         sys.exit(1)
+    
+    # List available ports for information
+    available_ports = list_serial_ports()
+    if args.port not in available_ports and available_ports:
+        print(f"\nWarning: Selected port {args.port} not found in available ports.")
+        print("Continuing anyway - device might not be connected yet.")
     
     # Create data container
     sensor_data = SensorData()
@@ -1037,12 +1105,6 @@ def main():
             sys.exit(1)
         print(f"Connected to TCP server at {args.host}:{args.tcp}")
     else:
-        # List available ports for information
-        available_ports = list_serial_ports()
-        if args.port not in available_ports and available_ports:
-            print(f"\nWarning: Selected port {args.port} not found in available ports.")
-            print("Continuing anyway - device might not be connected yet.")
-        
         reader = SerialReader(args.port, args.baudrate, sensor_data, data_logger)
         if not reader.start():
             print(f"Failed to open serial port {args.port}")
@@ -1050,20 +1112,22 @@ def main():
             sys.exit(1)
         print(f"Connected to {args.port} at {args.baudrate} baud")
     
-    # Choose interface type based on --no-tui flag
-    if args.no_tui:
-        print("Starting simple CLI interface...")
-        app = SimpleCLI(sensor_data, reader, data_logger)
-    else:
-        print("Starting CLI interface...")
-        app = CLIInterface(sensor_data, reader, data_logger)
-    
+    # Check if we should use simple CLI or ncurses
+    # Check if we should use simple CLI or ncurses
     try:
-        app.run()
+        if args.no_tui:
+            # Use simple CLI without ncurses
+            print("Starting simple CLI interface...")
+            app = SimpleCLI(sensor_data, reader, data_logger)
+            app.run()
+        else:
+            # Use ncurses TUI (default)
+            print("Starting CLI interface...")
+            app = CLIInterface(sensor_data, reader, data_logger)
+            app.run()
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
-        # Stop reader
         reader.stop()
         
         # Stop data logger and save final data (if enabled)
@@ -1071,7 +1135,6 @@ def main():
             data_logger.stop()
         
         print("Goodbye!")
-
 
 if __name__ == '__main__':
     main()
