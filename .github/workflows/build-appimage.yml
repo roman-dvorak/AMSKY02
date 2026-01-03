@@ -1,0 +1,173 @@
+name: Build AppImage
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build AppImage for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64, armv7]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up QEMU for cross-compilation
+        if: matrix.arch != 'x86_64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,arm
+
+      - name: Build AppImage in Docker
+        run: |
+          # Vytvoř build skript pro Docker
+          cat > build_appimage.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Instaluj závislosti
+          apt-get update
+          apt-get install -y python3 python3-pip python3-venv wget file desktop-file-utils \
+                             libglib2.0-0 libgl1 libxcb-cursor0 libxkbcommon-x11-0 \
+                             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+                             libxcb-render-util0 libxcb-shape0 libdbus-1-3 \
+                             libxcb-xinerama0 libxcb-xfixes0
+          
+          # Vytvoř virtuální prostředí
+          python3 -m venv /opt/venv
+          . /opt/venv/bin/activate
+          
+          # Upgrade pip
+          pip install --upgrade pip
+          
+          # Instaluj aplikaci a její závislosti
+          cd /workspace
+          pip install .
+          pip install pyinstaller
+          
+          # Vytvoř PyInstaller spec
+          pyinstaller --onefile --windowed \
+                      --name amsky01_viewer \
+                      --add-data "sw:sw" \
+                      --hidden-import PySide6 \
+                      --hidden-import pyqtgraph \
+                      --hidden-import numpy \
+                      --hidden-import serial \
+                      --hidden-import h5py \
+                      sw/amsky01_viewer.py
+          
+          # Vytvoř AppDir strukturu
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          
+          # Zkopíruj executable
+          cp dist/amsky01_viewer AppDir/usr/bin/
+          
+          # Vytvoř desktop file
+          cat > AppDir/usr/share/applications/amsky01_viewer.desktop << 'DESKTOP'
+          [Desktop Entry]
+          Name=AMSKY01 Viewer
+          Exec=amsky01_viewer
+          Icon=amsky01_viewer
+          Type=Application
+          Categories=Science;Education;
+          Comment=AMSKY01 Sensor Data Viewer
+          Terminal=false
+          DESKTOP
+          
+          # Vytvoř placeholder ikonu (PNG 256x256)
+          python3 << 'PYTHON'
+          from PIL import Image, ImageDraw, ImageFont
+          
+          img = Image.new('RGBA', (256, 256), (33, 150, 243, 255))
+          draw = ImageDraw.Draw(img)
+          
+          try:
+              font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+          except:
+              font = ImageFont.load_default()
+          
+          text = "AMSKY01"
+          bbox = draw.textbbox((0, 0), text, font=font)
+          text_width = bbox[2] - bbox[0]
+          text_height = bbox[3] - bbox[1]
+          x = (256 - text_width) // 2
+          y = (256 - text_height) // 2
+          draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
+          
+          img.save('/workspace/AppDir/usr/share/icons/hicolor/256x256/apps/amsky01_viewer.png')
+          PYTHON
+          
+          # Stáhni appimagetool
+          cd /workspace
+          ARCH="${1:-x86_64}"
+          
+          if [ "$ARCH" == "x86_64" ]; then
+              wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+              chmod +x appimagetool-x86_64.AppImage
+              APPIMAGETOOL=./appimagetool-x86_64.AppImage
+          elif [ "$ARCH" == "aarch64" ]; then
+              wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-aarch64.AppImage
+              chmod +x appimagetool-aarch64.AppImage
+              APPIMAGETOOL=./appimagetool-aarch64.AppImage
+          elif [ "$ARCH" == "armv7" ]; then
+              wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-armhf.AppImage
+              chmod +x appimagetool-armhf.AppImage
+              APPIMAGETOOL=./appimagetool-armhf.AppImage
+          fi
+          
+          # Vytvoř AppImage
+          ARCH="$ARCH" $APPIMAGETOOL AppDir amsky01_viewer-${ARCH}.AppImage
+          
+          echo "AppImage vytvořen: amsky01_viewer-${ARCH}.AppImage"
+          ls -lh amsky01_viewer-*.AppImage
+          EOF
+          
+          chmod +x build_appimage.sh
+          
+          # Spusť build v Docker kontejneru pro danou architekturu
+          if [ "${{ matrix.arch }}" == "x86_64" ]; then
+            PLATFORM="linux/amd64"
+            ARCH_NAME="x86_64"
+          elif [ "${{ matrix.arch }}" == "aarch64" ]; then
+            PLATFORM="linux/arm64"
+            ARCH_NAME="aarch64"
+          elif [ "${{ matrix.arch }}" == "armv7" ]; then
+            PLATFORM="linux/arm/v7"
+            ARCH_NAME="armv7"
+          fi
+          
+          docker run --rm --platform ${PLATFORM} \
+            -v $(pwd):/workspace \
+            -w /workspace \
+            python:3.11-slim \
+            bash /workspace/build_appimage.sh ${ARCH_NAME}
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: amsky01_viewer-${{ matrix.arch }}-AppImage
+          path: amsky01_viewer-${{ matrix.arch }}.AppImage
+          retention-days: 30
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: amsky01_viewer-${{ matrix.arch }}.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=AMSKY01 Viewer
+Exec=amsky01_viewer
+Icon=amsky01_viewer
+Type=Application
+Categories=Science;Education;Astronomy;
+Comment=AMSKY01 Sensor Data Viewer - Real-time visualization of atmospheric sensor data
+Terminal=false
+StartupNotify=true
