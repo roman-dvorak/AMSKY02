@@ -126,7 +126,7 @@ jobs:
           fi
           
           # Vytvoř AppImage
-          ARCH="$ARCH" $APPIMAGETOOL AppDir amsky01_viewer-${ARCH}.AppImage
+          ARCH="$ARCH" $APPIMAGETOOL --no-appstream AppDir amsky01_viewer-${ARCH}.AppImage
           
           echo "AppImage vytvořen: amsky01_viewer-${ARCH}.AppImage"
           ls -lh amsky01_viewer-*.AppImage
