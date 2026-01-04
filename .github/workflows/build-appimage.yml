@@ -49,7 +49,7 @@ jobs:
                              libxcb-render-util0 libxcb-shape0 libdbus-1-3 \
                              libxcb-xinerama0 libxcb-xfixes0 python3-pil upx \
                              libgssapi-krb5-2 libkrb5-3 libfontconfig1 libegl1 \
-                             libgtk-3-0 libtiff5 libxkbcommon0
+                             libgtk-3-0 libxkbcommon0
           
           # Vytvoř virtuální prostředí
           python3 -m venv /opt/venv
