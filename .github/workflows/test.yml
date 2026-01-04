@@ -37,10 +37,10 @@ jobs:
 
     - name: Test installation
       run: |
-        python -c "import sensor_viewer, debug_sensor, plot_logs"
+        python -c "import amsky01_viewer, amsky01_cli, plot_logs"
 
     - name: Test entry points
       run: |
         amsky01-viewer --help || true
-        amsky01-debug --help || true  
+        amsky01-cli --help || true
         amsky01-plot --help || true
