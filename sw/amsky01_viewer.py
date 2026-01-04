@@ -8,11 +8,11 @@ Zobrazuje:
 - osvětlení z TSL2591 ($light) včetně SQM
 
 Závislosti:
-    pip install pyserial numpy pyqtgraph PyQt5 h5py
+    pip install pyserial numpy pyqtgraph PySide6 h5py
 
 Spuštění (příklad):
-    python melexis.py --port /dev/ttyACM0 --baud 115200
-    python melexis.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
+    python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200
+    python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
 """
 
 import argparse

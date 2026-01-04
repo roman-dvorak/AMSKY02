@@ -17,8 +17,6 @@ python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200
 python amsky01_viewer.py --port /dev/ttyACM0 --debug  # with communication output
 ```
 
-**Dependencies:** `pyserial`, `numpy`, `pyqtgraph`, `PyQt5`
-
 ---
 
 ### `amsky01_cli.py`
