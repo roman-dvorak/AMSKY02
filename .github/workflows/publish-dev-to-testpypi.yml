@@ -1,4 +1,4 @@
-name: Publish dev build to TestPyPI
+name: Publish dev build to PyPI
 
 on:
   push:
@@ -56,12 +56,12 @@ jobs:
           name: python-dev-distributions
           path: dist/
 
-  testpypi-publish:
-    name: Upload to TestPyPI
+  pypi-publish:
+    name: Upload to PyPI
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      id-token: write
+      contents: read
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -69,8 +69,8 @@ jobs:
           name: python-dev-distributions
           path: dist/
 
-      - name: Publish to TestPyPI (token or OIDC)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
