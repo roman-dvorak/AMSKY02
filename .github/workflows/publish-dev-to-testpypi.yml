@@ -69,7 +69,8 @@ jobs:
           name: python-dev-distributions
           path: dist/
 
-      - name: Publish to TestPyPI (trusted publishing)
+      - name: Publish to TestPyPI (token or OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
