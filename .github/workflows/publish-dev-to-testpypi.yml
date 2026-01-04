@@ -57,10 +57,11 @@ jobs:
           path: dist/
 
   testpypi-publish:
-    name: Upload to TestPyPI (optional)
+    name: Upload to TestPyPI
     needs: build
     runs-on: ubuntu-latest
-    if: ${{ secrets.TEST_PYPI_API_TOKEN != '' }}
+    permissions:
+      id-token: write
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -68,8 +69,7 @@ jobs:
           name: python-dev-distributions
           path: dist/
 
-      - name: Publish to TestPyPI
+      - name: Publish to TestPyPI (trusted publishing)
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
