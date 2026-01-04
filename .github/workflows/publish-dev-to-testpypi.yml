@@ -31,9 +31,8 @@ jobs:
           base = m.group(1)
           # strip any existing suffix
           base = re.sub(r"(\.dev.*|\+.*)$", "", base)
-          ts = datetime.datetime.utcnow().strftime('%Y%m%d%H%M')
-          sha = os.getenv('GITHUB_SHA', '')[:7]
-          new = f"{base}.dev{ts}+g{sha}" if sha else f"{base}.dev{ts}"
+          ts = datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')
+          new = f"{base}.dev{ts}"
           s2 = re.sub(r"__version__\s*=\s*\"[^\"]+\"", f"__version__ = \"{new}\"", s)
           p.write_text(s2)
           print('Set dev version:', new)
