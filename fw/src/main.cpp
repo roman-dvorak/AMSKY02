@@ -298,23 +298,24 @@ void loop() {
     }
     
     if (tsl_available && amsSensor.isAvailable()) {
-      float normalized_lux;
-      uint16_t full_raw, ir_raw;
+      uint32_t ulux;
+      uint16_t full_avg, ir_avg;
       const char* gain_str;
       const char* integration_time_str;
       
-      if (amsSensor.readLightData(normalized_lux, full_raw, ir_raw, gain_str, integration_time_str)) {
+      if (amsSensor.readLightData(ulux, full_avg, ir_avg, gain_str, integration_time_str)) {
         // Convert normalized_lux to double for SQM calculation
-        double lux_double = (double)normalized_lux;
+        // Convert ulux to lux (divide by 1,000,000)
+        double lux_double = (double)ulux / 1000000.0;
         double sqm_value = convert_lux_to_sqm(lux_double);
         
         // Output in CSV format: light,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm
         Serial.print("$light,");
-        Serial.print(normalized_lux, 2);  // Normalized lux value with 2 decimal places
+        Serial.print(ulux);  // Lux value in microlux (uLux)
         Serial.print(",");
-        Serial.print(full_raw);    // Raw full spectrum value
+        Serial.print(full_avg);    // Averaged full spectrum value
         Serial.print(",");
-        Serial.print(ir_raw);      // Raw IR value
+        Serial.print(ir_avg);      // Averaged IR value
         Serial.print(",");
         Serial.print(gain_str); // Current gain setting
         Serial.print(",");

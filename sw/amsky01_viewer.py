@@ -1,6 +1,6 @@
-"""Melexis AMSKY01 vizualizátor dat z UARTu.
+"""Melexis AMSKY01 viewer from serial data
 
-Zobrazuje:
+Shows:
 - IR mapu z MLX90641 ($thrmap)
 - Ta/Vdd z MLX90641 ($cloud_meta)
 - rohy/střed z MLX90641 ($cloud)
@@ -86,9 +86,10 @@ def parse_light(line: str):
     if len(parts) < 7:
         return None
     try:
-        lux = float(parts[1])
-        full_raw = float(parts[2])
-        ir_raw = float(parts[3])
+        ulux = int(parts[1])  # microlux (uLux)
+        lux = ulux / 1000000.0  # Convert to lux
+        full_raw = int(parts[2])  # Averaged full spectrum
+        ir_raw = int(parts[3])  # Averaged IR
         gain = parts[4]
         itime = parts[5]
         sqm = float(parts[6])
@@ -562,8 +563,8 @@ class ConfigDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, ser: serial.Serial, vmin=None, vmax=None, rotation=0.0, debug=False, 
-                 enable_logging=False, device_id="AMSKY01", log_path=None, sqm_zp=24.0, parent=None):
+    def __init__(self, ser: serial.Serial, vmin=None, vmax=None, rotation=0.0, debug=False,
+                 enable_logging=False, enable_http_api=False, device_id="AMSKY01", log_path=None, sqm_zp=24.0, parent=None):
         super().__init__(parent)
         self.ser = ser
         self.vmin = vmin
@@ -605,8 +606,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.http_server = None
         self.http_thread = None
         self.http_enabled = False
+        self.enable_http_api_on_start = enable_http_api
 
-        self.setWindowTitle("AMSKY01 / MLX90641 vizualizátor")
+        self.setWindowTitle("AMSKY01 viewer")
         
         # --- Menu bar ---
         menubar = self.menuBar()
@@ -651,6 +653,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer.setInterval(50)  # ms
         self.timer.timeout.connect(self.poll_serial)
         self.timer.start()
+
+        # Start HTTP API if requested
+        if self.enable_http_api_on_start:
+            self.api_enable_check.setChecked(True)
+            self.toggle_http_api(True)
     
     def create_graph_tab(self):
         """Vytvoří první kartu s grafem."""
@@ -659,6 +666,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Levá část: IR obraz
         self.graphics = pg.GraphicsLayoutWidget()
+        self.graphics.setBackground("#1a1a1a")
         hbox.addWidget(self.graphics, 2)
 
         self.view = self.graphics.addViewBox()
@@ -711,12 +719,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Light
         self.lbl_lux = make_label()
+        self.lbl_sensor_lux = make_label()
         self.lbl_full = make_label()
         self.lbl_ir = make_label()
         self.lbl_gain = make_label()
         self.lbl_itime = make_label()
         self.lbl_sqm = make_label()
-        form.addRow("Lux", self.lbl_lux)
+        form.addRow("Lux (calculated)", self.lbl_lux)
+        form.addRow("Lux (sensor)", self.lbl_sensor_lux)
         form.addRow("TSL full", self.lbl_full)
         form.addRow("TSL IR", self.lbl_ir)
         form.addRow("TSL gain", self.lbl_gain)
@@ -759,7 +769,8 @@ class MainWindow(QtWidgets.QMainWindow):
             "SHT4x Temp [°C]",
             "SHT4x RH [%]",
             "Dew Point [°C]",
-            "Lux",
+            "Lux (sensor)",
+            "Lux (calculated)",
             "TSL Full",
             "TSL IR",
             "TSL Gain",
@@ -915,6 +926,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{d['hygro']['temp']:.2f}" if d['hygro']['temp'] is not None else "—",
                 f"{d['hygro']['rh']:.2f}" if d['hygro']['rh'] is not None else "—",
                 f"{d['hygro']['dew_point']:.2f}" if d['hygro']['dew_point'] is not None else "—",
+                f"{d['light']['sensor_lux']:.6f}" if d['light'].get('sensor_lux') is not None else "—",
                 f"{d['light']['lux']:.6f}" if d['light']['lux'] is not None else "—",
                 f"{d['light']['full']:.0f}" if d['light']['full'] is not None else "—",
                 f"{d['light']['ir']:.0f}" if d['light']['ir'] is not None else "—",
@@ -1005,6 +1017,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # Vypočítej lux z raw dat pomocí TSL2591 algoritmu
                 tsl_lux_calc = calculate_tsl2591_lux(int(full_raw), int(ir_raw), gain, itime)
+                
+                # Display sensor lux value (from serial)
+                self.lbl_sensor_lux.setText(f"{lux:.2f}")
+                self.current_data["light"]["sensor_lux"] = lux
+                
                 if tsl_lux_calc >= 0:
                     self.lbl_lux.setText(f"{tsl_lux_calc:.2f}")
                     self.current_data["light"]["lux"] = tsl_lux_calc
@@ -1114,6 +1131,7 @@ def main():
     parser.add_argument("--rotation", type=float, default=0.0, help="rotace obrazu ve stupních (kladně proti směru hodinových ručiček)")
     parser.add_argument("--debug", action="store_true", help="zobraz všechny zprávy na seriové lince")
     parser.add_argument("--log", action="store_true", help="zapni HDF5 logování při startu")
+    parser.add_argument("--api", action="store_true", help="zapni HTTP API při startu")
     parser.add_argument("--log-name", type=str, default=None, help="ID zařízení pro názvy HDF5 souborů (default: z konfigurace)")
     parser.add_argument("--log-path", type=str, default=None, help="cesta pro ukládání HDF5 souborů (default: z konfigurace)")
     parser.add_argument("--sqm-zp", type=float, default=24.0, help="SQM kalibrační konstanta (výchozí: 24.0)")
@@ -1137,6 +1155,47 @@ def main():
 
     app = QtWidgets.QApplication(sys.argv)
     
+    # Nastavení dark mode
+    palette = QtGui.QPalette()
+    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
+    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(35, 35, 35))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
+    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(25, 25, 25))
+    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
+    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(255, 255, 255))
+    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 0, 0))
+    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
+    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
+    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(35, 35, 35))
+    app.setPalette(palette)
+    
+    # Nastavení stylu widgetů
+    app.setStyleSheet("""
+        QToolTip { 
+            color: #ffffff; 
+            background-color: #2a2a2a; 
+            border: 1px solid #555555; 
+        }
+        QMenuBar {
+            background-color: #353535;
+            color: #ffffff;
+        }
+        QMenuBar::item:selected {
+            background-color: #2a82da;
+        }
+        QMenu {
+            background-color: #353535;
+            color: #ffffff;
+            border: 1px solid #555555;
+        }
+        QMenu::item:selected {
+            background-color: #2a82da;
+        }
+    """)
+    
     # Nastavení aplikace pro QSettings
     app.setOrganizationName("AstroMeters")
     app.setApplicationName("AMSKY01Viewer")
@@ -1148,6 +1207,7 @@ def main():
         rotation=args.rotation, 
         debug=args.debug,
         enable_logging=args.log,
+        enable_http_api=args.api,
         device_id=args.log_name,
         log_path=args.log_path,
         sqm_zp=args.sqm_zp

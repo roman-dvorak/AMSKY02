@@ -13,8 +13,9 @@ bool AMS_TSL2591::begin(TwoWire *wire) {
     if (tsl.begin(wire)) {
         // Configure TSL2591 sensor
         current_gain = TSL2591_GAIN_MED;
+        current_integration_time = TSL2591_INTEGRATIONTIME_300MS;
         tsl.setGain(current_gain);
-        tsl.setTiming(TSL2591_INTEGRATIONTIME_300MS);
+        tsl.setTiming(current_integration_time);
         
         Serial.println("# TSL2591 light sensor initialized successfully");
         Serial.print("# Initial gain: ");
@@ -154,8 +155,31 @@ bool AMS_TSL2591::adjustGainAndIntegrationTime(uint16_t full_value) {
             }
         }
     }
-    // If signal is very low, try to increase integration time first, then gain
+    // Keep signal inside target window (20000-30000) when not saturated
+    else if (full_value > INTEGRATION_TIME_DECREASE_THRESHOLD) {
+        // Prefer shortening integration time first
+        if (current_integration_time != TSL2591_INTEGRATIONTIME_100MS) {
+            switch(current_integration_time) {
+                case TSL2591_INTEGRATIONTIME_600MS: new_integration_time = TSL2591_INTEGRATIONTIME_500MS; break;
+                case TSL2591_INTEGRATIONTIME_500MS: new_integration_time = TSL2591_INTEGRATIONTIME_400MS; break;
+                case TSL2591_INTEGRATIONTIME_400MS: new_integration_time = TSL2591_INTEGRATIONTIME_300MS; break;
+                case TSL2591_INTEGRATIONTIME_300MS: new_integration_time = TSL2591_INTEGRATIONTIME_200MS; break;
+                case TSL2591_INTEGRATIONTIME_200MS: new_integration_time = TSL2591_INTEGRATIONTIME_100MS; break;
+                default: break;
+            }
+            changed = true;
+        } else if (current_gain != TSL2591_GAIN_LOW) {
+            switch(current_gain) {
+                case TSL2591_GAIN_MAX:  new_gain = TSL2591_GAIN_HIGH; break;
+                case TSL2591_GAIN_HIGH: new_gain = TSL2591_GAIN_MED; break;
+                case TSL2591_GAIN_MED:  new_gain = TSL2591_GAIN_LOW; break;
+                default: break;
+            }
+            changed = true;
+        }
+    }
     else if (full_value < INTEGRATION_TIME_INCREASE_THRESHOLD) {
+        // Prefer lengthening integration time first
         if (current_integration_time != TSL2591_INTEGRATIONTIME_600MS) {
             switch(current_integration_time) {
                 case TSL2591_INTEGRATIONTIME_100MS: new_integration_time = TSL2591_INTEGRATIONTIME_200MS; break;
@@ -171,34 +195,6 @@ bool AMS_TSL2591::adjustGainAndIntegrationTime(uint16_t full_value) {
                 case TSL2591_GAIN_LOW:  new_gain = TSL2591_GAIN_MED; break;
                 case TSL2591_GAIN_MED:  new_gain = TSL2591_GAIN_HIGH; break;
                 case TSL2591_GAIN_HIGH: new_gain = TSL2591_GAIN_MAX; break;
-                default: break;
-            }
-            changed = true;
-        }
-    }
-    // If signal is a bit high, but not saturated, decrease integration time if possible
-    else if (full_value > INTEGRATION_TIME_DECREASE_THRESHOLD) {
-        if (current_integration_time != TSL2591_INTEGRATIONTIME_100MS) {
-            switch(current_integration_time) {
-                case TSL2591_INTEGRATIONTIME_600MS: new_integration_time = TSL2591_INTEGRATIONTIME_500MS; break;
-                case TSL2591_INTEGRATIONTIME_500MS: new_integration_time = TSL2591_INTEGRATIONTIME_400MS; break;
-                case TSL2591_INTEGRATIONTIME_400MS: new_integration_time = TSL2591_INTEGRATIONTIME_300MS; break;
-                case TSL2591_INTEGRATIONTIME_300MS: new_integration_time = TSL2591_INTEGRATIONTIME_200MS; break;
-                case TSL2591_INTEGRATIONTIME_200MS: new_integration_time = TSL2591_INTEGRATIONTIME_100MS; break;
-                default: break;
-            }
-            changed = true;
-        }
-    }
-    // If signal is a bit low, but not very low, increase integration time if possible
-    else if (full_value < GAIN_TOO_LOW_THRESHOLD) {
-        if (current_integration_time != TSL2591_INTEGRATIONTIME_600MS) {
-            switch(current_integration_time) {
-                case TSL2591_INTEGRATIONTIME_100MS: new_integration_time = TSL2591_INTEGRATIONTIME_200MS; break;
-                case TSL2591_INTEGRATIONTIME_200MS: new_integration_time = TSL2591_INTEGRATIONTIME_300MS; break;
-                case TSL2591_INTEGRATIONTIME_300MS: new_integration_time = TSL2591_INTEGRATIONTIME_400MS; break;
-                case TSL2591_INTEGRATIONTIME_400MS: new_integration_time = TSL2591_INTEGRATIONTIME_500MS; break;
-                case TSL2591_INTEGRATIONTIME_500MS: new_integration_time = TSL2591_INTEGRATIONTIME_600MS; break;
                 default: break;
             }
             changed = true;
@@ -225,26 +221,62 @@ bool AMS_TSL2591::adjustGainAndIntegrationTime(uint16_t full_value) {
     return true;
 }
 
-bool AMS_TSL2591::readLightData(float &normalized_lux, uint16_t &full_raw, uint16_t &ir_raw, 
+
+float AMS_TSL2591::calculateLuxFromRaw(uint16_t ch0_full, uint16_t ch1_ir) {
+    if (ch0_full == 0xFFFF || ch1_ir == 0xFFFF) {
+        return -1.0;
+    }
+    
+    float atime = getIntegrationTimeMs(current_integration_time);
+    float again = getGainValue(current_gain);
+    
+    float LUX_DF = 408.0;
+    float cpl = (atime * again) / LUX_DF;
+    
+    float lux;
+    if (ch0_full > 0) {
+        lux = ((float(ch0_full) - float(ch1_ir)) * (1.0 - (float(ch1_ir) / float(ch0_full)))) / cpl;
+    } else {
+        lux = 0.0;
+    }
+    
+    return lux;
+}
+
+bool AMS_TSL2591::readLightData(uint32_t &ulux, uint16_t &full_avg, uint16_t &ir_avg, 
                                  const char* &gain_str, const char* &integration_time_str) {
     uint32_t lum = tsl.getFullLuminosity();
-
-    ir_raw = lum >> 16;
-    full_raw = lum & 0xFFFF;
+    uint16_t ir_raw = lum >> 16;
+    uint16_t full_raw = lum & 0xFFFF;
     
-    // Calculate actual lux value
-    float lux = tsl.calculateLux(full_raw, ir_raw);
+    full_buffer[buffer_index] = full_raw;
+    ir_buffer[buffer_index] = ir_raw;
+    buffer_index = (buffer_index + 1) % MOVING_AVG_SIZE;
+    if (buffer_count < MOVING_AVG_SIZE) {
+        buffer_count++;
+    }
     
-    // Normalize the lux value by gain and integration time
-    float normalization_factor = getGainValue(current_gain) * getIntegrationTimeMs(current_integration_time) / 300.0; // 300ms is the base integration time
-    normalized_lux = lux / normalization_factor;
+    uint32_t full_sum = 0;
+    uint32_t ir_sum = 0;
+    for (uint8_t i = 0; i < buffer_count; i++) {
+        full_sum += full_buffer[i];
+        ir_sum += ir_buffer[i];
+    }
+    full_avg = full_sum / buffer_count;
+    ir_avg = ir_sum / buffer_count;
     
-    // Check if we need to adjust gain and integration time (but not too frequently)
+    float lux = calculateLuxFromRaw(full_avg, ir_avg);
+    
+    if (lux >= 0) {
+        ulux = (uint32_t)(lux * 1000000.0);
+    } else {
+        ulux = 0;
+    }
+    
     unsigned long current_time = millis();
     if (current_time - last_gain_adjustment >= GAIN_ADJUSTMENT_INTERVAL) {
         if (adjustGainAndIntegrationTime(full_raw)) {
             last_gain_adjustment = current_time;
-            // Return false to indicate that settings changed and measurement should be skipped
             return false;
         }
     }

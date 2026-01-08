@@ -15,13 +15,21 @@ private:
     uint16_t previous_measurement;
     bool improvement_detected;
     
+    // Moving average buffers
+    static const uint8_t MOVING_AVG_SIZE = 16;
+    uint16_t full_buffer[MOVING_AVG_SIZE];
+    uint16_t ir_buffer[MOVING_AVG_SIZE];
+    uint8_t buffer_index;
+    uint8_t buffer_count;
+    
     // Thresholds
     static const unsigned long GAIN_ADJUSTMENT_INTERVAL = 5000;
-    static const uint16_t GAIN_SATURATED_THRESHOLD = 60000;
-    static const uint16_t EXTREME_SATURATED_THRESHOLD = 64000;
-    static const uint16_t GAIN_TOO_LOW_THRESHOLD = 2000;
+    static const uint16_t GAIN_SATURATED_THRESHOLD = 32000;
+    static const uint16_t EXTREME_SATURATED_THRESHOLD = 35000;
+    // Target window for raw full spectrum counts
+    static const uint16_t GAIN_TOO_LOW_THRESHOLD = 10000;   // below -> increase
     static const uint16_t INTEGRATION_TIME_INCREASE_THRESHOLD = 1500;
-    static const uint16_t INTEGRATION_TIME_DECREASE_THRESHOLD = 50000;
+    static const uint16_t INTEGRATION_TIME_DECREASE_THRESHOLD = 30000; // above -> decrease
     
     // Smart alternating adjustment tracking
     enum LastAdjustmentType {
@@ -38,6 +46,7 @@ private:
     float getIntegrationTimeMs(tsl2591IntegrationTime_t integrationTime);
     const char* getIntegrationTimeString(tsl2591IntegrationTime_t integrationTime);
     bool adjustGainAndIntegrationTime(uint16_t full_value);
+    float calculateLuxFromRaw(uint16_t ch0_full, uint16_t ch1_ir);
     
 public:
     // Constructor
@@ -50,7 +59,7 @@ public:
     bool isAvailable() const;
     
     // Measurement
-    bool readLightData(float &normalized_lux, uint16_t &full_raw, uint16_t &ir_raw, 
+    bool readLightData(uint32_t &ulux, uint16_t &full_avg, uint16_t &ir_avg, 
                        const char* &gain_str, const char* &integration_time_str);
     
     // Settings
