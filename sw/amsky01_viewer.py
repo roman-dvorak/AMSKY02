@@ -86,10 +86,9 @@ def parse_light(line: str):
     if len(parts) < 7:
         return None
     try:
-        ulux = int(parts[1])  # microlux (uLux)
-        lux = ulux / 1000000.0  # Convert to lux
-        full_raw = int(parts[2])  # Averaged full spectrum
-        ir_raw = int(parts[3])  # Averaged IR
+        lux = float(parts[1])
+        full_raw = float(parts[2])
+        ir_raw = float(parts[3])
         gain = parts[4]
         itime = parts[5]
         sqm = float(parts[6])
@@ -219,25 +218,106 @@ def gain_str_to_float(gain_str: str) -> float:
     }
     return gain_map.get(gain_str, 1.0)
 
-def calculate_sqm(full_raw: int, ir_raw: int, itime_ms: float, gain: float, zp: float = 24.0) -> float:
+def calculate_sqm_from_raw(ir_raw, full_raw, gain_value, integration_ms, 
+                           sqm_offset_base=12.6, sqm_magnitude_const=1.086, 
+                           calibration_offset=0.0):
     """
-    Převod TSL2591 -> sky brightness (mag/arcsec^2) přes log vztah a kalibrační konstantu.
-    - používá (FULL - IR)
-    - normalizuje na integrační čas a gain
-    - zp je kalibrační konstanta (výchozí 24.0)
+    Vypočítá SQM (Sky Brightness) z raw TSL2591 senzorových dat.
+    
+    Algoritmus podle specifikace:
+    1) Změř raw hodnoty kanálů (ir_raw = CH1, full_raw = CH0)
+    2) Volitelná teplotní korekce (zakomentována)
+    3) Viditelná složka (vis_raw = full_raw - ir_raw)
+    4) Normalizace na referenci 200ms a na gain
+    5) Převod na mag/arcsec^2 pomocí ln()
+    6) Odhad chyby
+    
+    Args:
+        ir_raw: Raw IR hodnota (CH1)
+        full_raw: Raw FULL hodnota (CH0 = VIS + IR)
+        gain_value: Aktuální zesílení senzoru
+        integration_ms: Integrační čas v milisekundách
+        sqm_offset_base: Základní konstanta pro výpočet (typicky 12.6)
+        sqm_magnitude_const: Konstanta pro ln() konverzi (typicky 1.086)
+        calibration_offset: Kalibrační offset (může být 0.0)
+    
+    Returns:
+        dict s klíči:
+            - 'valid': bool, zda je měření validní
+            - 'mpsas': float, jas oblohy v mag/arcsec^2
+            - 'dmpsas': float, odhad chyby
     """
-    # 1) "viditelný" signál (counts)
-    vis = max(0.0, float(full_raw) - float(1.64 * ir_raw))
+    import math
+    
+    result = {'valid': False, 'mpsas': None, 'dmpsas': None}
+    
+    # 1) Raw hodnoty jsou již naměřeny (parametry)
+    # ir_raw = CH1 (IR)
+    # full_raw = CH0 (FULL = VIS + IR)
+    
+    # 2) Teplotní korekce - ZAKOMENTOVÁNA
+    # if temperature_available:
+    #     ir_raw = ir_raw * (temperature * ir_slope + ir_intercept)
+    #     full_raw = full_raw * (temperature * full_slope + full_intercept)
+    
+    # 3) Viditelná složka
+    vis_raw = float(full_raw) - float(ir_raw)
+    if vis_raw <= 0.0:
+        # Invalidní měření - nižší viditelná složka
+        return result
+    
+    # 4) Normalizace na referenci 200 ms a na gain
+    # normalization = gainValue * (integrationMs / 200.0) * niter
+    normalization = gain_value * (integration_ms / 200.0) * 1
+    vis = vis_raw / normalization
+    
+    if vis <= 0.0:
+        # Invalidní měření - normalizovaná viditelná složka je nula nebo negativní
+        return result
+    
+    # 5) Převod na mag/arcsec^2
+    # mpsas = sqmOffsetBase - sqmMagnitude * ln(VIS) + calibrationOffset
+    # (ln je přirozený logaritmus)
+    mpsas = sqm_offset_base - sqm_magnitude_const * math.log(vis) + calibration_offset
+    
+    # 6) Odhad chyby (podle knihovny; bere sqrt z nenormalizovaného vis_raw)
+    # dmpsas = sqmMagnitude / sqrt(vis_raw)
+    dmpsas = sqm_magnitude_const / math.sqrt(vis_raw)
+    
+    result['valid'] = True
+    result['mpsas'] = mpsas
+    result['dmpsas'] = dmpsas
+    
+    return result
 
-    # 2) normalizace (counts per second per gain)
-    t_s = max(1e-6, itime_ms / 1000.0)
-    s = vis / (t_s * max(1e-6, float(gain)))
 
-    # 3) mag/arcsec^2
-    #    mpsas = ZP - 2.5*log10(S)
-    if s <= 0:
-        return float("inf")  # nebo třeba 99.0
-    return float(zp - 2.5 * math.log10(s))
+def calculate_sqm(full_raw: int, ir_raw: int, itime_ms: float, gain: float, 
+                  sqm_offset_base: float = 12.6, sqm_magnitude_const: float = 1.086,
+                  zp: float = None) -> float:
+    """
+    Převod TSL2591 raw dat -> sky brightness (mag/arcsec^2) pomocí nového algoritmu.
+    
+    Tato funkce je kompatibilní se starým rozhraním, ale používá nový algoritmus.
+    
+    Args:
+        full_raw: Raw FULL hodnota (CH0)
+        ir_raw: Raw IR hodnota (CH1)
+        itime_ms: Integrační čas v milisekundách
+        gain: Aktuální zesílení senzoru
+        sqm_offset_base: Základní konstanta (default 12.6)
+        sqm_magnitude_const: Konstanta pro ln() (default 1.086)
+        zp: Zastaralá kalibrační konstanta (ignorována, pro backward compatibility)
+    
+    Returns:
+        float: SQM v mag/arcsec^2, nebo float('inf') pokud je měření invalidní
+    """
+    result = calculate_sqm_from_raw(ir_raw, full_raw, gain, itime_ms,
+                                    sqm_offset_base, sqm_magnitude_const, 0.0)
+    
+    if result['valid']:
+        return result['mpsas']
+    else:
+        return float('inf')
 
 def calculate_normalized_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
     """
@@ -719,14 +799,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Light
         self.lbl_lux = make_label()
-        self.lbl_sensor_lux = make_label()
         self.lbl_full = make_label()
         self.lbl_ir = make_label()
         self.lbl_gain = make_label()
         self.lbl_itime = make_label()
         self.lbl_sqm = make_label()
-        form.addRow("Lux (calculated)", self.lbl_lux)
-        form.addRow("Lux (sensor)", self.lbl_sensor_lux)
+        form.addRow("Lux", self.lbl_lux)
         form.addRow("TSL full", self.lbl_full)
         form.addRow("TSL IR", self.lbl_ir)
         form.addRow("TSL gain", self.lbl_gain)
@@ -769,8 +847,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "SHT4x Temp [°C]",
             "SHT4x RH [%]",
             "Dew Point [°C]",
-            "Lux (sensor)",
-            "Lux (calculated)",
+            "Lux",
             "TSL Full",
             "TSL IR",
             "TSL Gain",
@@ -926,7 +1003,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 f"{d['hygro']['temp']:.2f}" if d['hygro']['temp'] is not None else "—",
                 f"{d['hygro']['rh']:.2f}" if d['hygro']['rh'] is not None else "—",
                 f"{d['hygro']['dew_point']:.2f}" if d['hygro']['dew_point'] is not None else "—",
-                f"{d['light']['sensor_lux']:.6f}" if d['light'].get('sensor_lux') is not None else "—",
                 f"{d['light']['lux']:.6f}" if d['light']['lux'] is not None else "—",
                 f"{d['light']['full']:.0f}" if d['light']['full'] is not None else "—",
                 f"{d['light']['ir']:.0f}" if d['light']['ir'] is not None else "—",
@@ -1017,11 +1093,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # Vypočítej lux z raw dat pomocí TSL2591 algoritmu
                 tsl_lux_calc = calculate_tsl2591_lux(int(full_raw), int(ir_raw), gain, itime)
-                
-                # Display sensor lux value (from serial)
-                self.lbl_sensor_lux.setText(f"{lux:.2f}")
-                self.current_data["light"]["sensor_lux"] = lux
-                
                 if tsl_lux_calc >= 0:
                     self.lbl_lux.setText(f"{tsl_lux_calc:.2f}")
                     self.current_data["light"]["lux"] = tsl_lux_calc

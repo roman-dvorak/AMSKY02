@@ -21,6 +21,8 @@ struct DeviceConfig {
     // Note: sqm_multiplier is always -2.5 (Pogson's ratio) and not configurable
     float sqm_dark_cap;       // Maximum SQM value for dark sky (default: 23.0)
     
+    float sqm_offset_base;    // Base offset for TSL2591 algorithm (default: 12.6)
+    float sqm_magnitude_const; // Magnitude constant for TSL2591 ln() conversion (default: 1.086)
     // Cloud sensor parameters
     float cloud_threshold;    // Temperature difference threshold for cloud detection (°C)
     
@@ -66,6 +68,8 @@ private:
         config.sqm_offset = 8.5265;  // Calculated for 10° FOV: 12.58 + 2.5*log10(Omega)
         config.sqm_dark_cap = 23.0;
         
+        config.sqm_offset_base = 12.6;   // Base offset constant for TSL2591 algorithm
+        config.sqm_magnitude_const = 1.086; // Magnitude constant (ln conversion and error estimation)
         // Cloud sensor defaults
         config.cloud_threshold = 5.0;  // 5°C difference
         
@@ -133,6 +137,8 @@ public:
     // Getters
     float getSqmOffset() { return config.sqm_offset; }
     float getSqmDarkCap() { return config.sqm_dark_cap; }
+    float getSqmOffsetBase() { return config.sqm_offset_base; }
+    float getSqmMagnitudeConst() { return config.sqm_magnitude_const; }
     float getCloudThreshold() { return config.cloud_threshold; }
     bool isAlertEnabled() { return config.alert_enabled; }
     bool isAlertOnCloud() { return config.alert_on_cloud; }
@@ -147,6 +153,8 @@ public:
     // Setters
     void setSqmOffset(float value) { config.sqm_offset = value; }
     void setSqmDarkCap(float value) { config.sqm_dark_cap = value; }
+    void setSqmOffsetBase(float value) { config.sqm_offset_base = value; }
+    void setSqmMagnitudeConst(float value) { config.sqm_magnitude_const = value; }
     void setCloudThreshold(float value) { config.cloud_threshold = value; }
     void setAlertEnabled(bool value) { config.alert_enabled = value; }
     void setAlertOnCloud(bool value) { config.alert_on_cloud = value; }
@@ -167,6 +175,8 @@ public:
         Serial.print("# SQM Offset: "); Serial.println(config.sqm_offset, 4);
         Serial.print("# SQM Dark Cap: "); Serial.println(config.sqm_dark_cap, 2);
         Serial.print("# Cloud Threshold: "); Serial.println(config.cloud_threshold, 2);
+        Serial.print("# SQM Offset Base: "); Serial.println(config.sqm_offset_base, 4);
+        Serial.print("# SQM Magnitude Const: "); Serial.println(config.sqm_magnitude_const, 4);
         Serial.print("# Alert Enabled: "); Serial.println(config.alert_enabled ? "YES" : "NO");
         Serial.print("# Alert on Cloud: "); Serial.println(config.alert_on_cloud ? "YES" : "NO");
         Serial.print("# Alert Cloud Temp Threshold: "); Serial.print(config.alert_cloud_temp_threshold, 2); Serial.print(" °C "); Serial.println(config.alert_cloud_below ? "(below)" : "(above)");

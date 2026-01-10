@@ -299,23 +299,40 @@ void loop() {
     
     if (tsl_available && amsSensor.isAvailable()) {
       uint32_t ulux;
-      uint16_t full_avg, ir_avg;
+      uint16_t full_raw, ir_raw;
       const char* gain_str;
       const char* integration_time_str;
       
-      if (amsSensor.readLightData(ulux, full_avg, ir_avg, gain_str, integration_time_str)) {
-        // Convert normalized_lux to double for SQM calculation
-        // Convert ulux to lux (divide by 1,000,000)
-        double lux_double = (double)ulux / 1000000.0;
-        double sqm_value = convert_lux_to_sqm(lux_double);
+      if (amsSensor.readLightData(ulux, full_raw, ir_raw, gain_str, integration_time_str)) {
+        // Calculate SQM using new TSL2591 algorithm from raw sensor data
+        float gain_value = amsSensor.getGainValueCurrent();
+        float integration_ms = amsSensor.getIntegrationTimeMsCurrent();
         
-        // Output in CSV format: light,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm
+        SQMResult sqm_result = calculate_sqm_from_raw(
+            ir_raw,
+            full_raw,
+            gain_value,
+            integration_ms,
+            1,
+            configManager.getSqmOffsetBase(),
+            configManager.getSqmMagnitudeConst(),
+            0.0
+        );
+        
+        double sqm_value;
+        if (sqm_result.valid) {
+            sqm_value = (double)sqm_result.mpsas;
+        } else {
+            double lux_double = (double)ulux / 1000000.0;
+            sqm_value = convert_lux_to_sqm(lux_double);
+        }
+
         Serial.print("$light,");
-        Serial.print(ulux);  // Lux value in microlux (uLux)
+        Serial.print(ulux);  // Lux value in microlux value with 2 decimal places
         Serial.print(",");
-        Serial.print(full_avg);    // Averaged full spectrum value
+        Serial.print(full_raw);    // Raw full spectrum value
         Serial.print(",");
-        Serial.print(ir_avg);      // Averaged IR value
+        Serial.print(ir_raw);      // Raw IR value
         Serial.print(",");
         Serial.print(gain_str); // Current gain setting
         Serial.print(",");

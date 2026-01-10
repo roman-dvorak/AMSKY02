@@ -42,7 +42,7 @@ const char* AMS_TSL2591::getGainString(tsl2591Gain_t gain) {
     }
 }
 
-float AMS_TSL2591::getGainValue(tsl2591Gain_t gain) {
+float AMS_TSL2591::getGainValue(tsl2591Gain_t gain) const {
     switch(gain) {
         case TSL2591_GAIN_LOW:  return 1.0;
         case TSL2591_GAIN_MED:  return 25.0;
@@ -52,7 +52,7 @@ float AMS_TSL2591::getGainValue(tsl2591Gain_t gain) {
     }
 }
 
-float AMS_TSL2591::getIntegrationTimeMs(tsl2591IntegrationTime_t integrationTime) {
+float AMS_TSL2591::getIntegrationTimeMs(tsl2591IntegrationTime_t integrationTime) const {
     switch(integrationTime) {
         case TSL2591_INTEGRATIONTIME_100MS: return 100.0;
         case TSL2591_INTEGRATIONTIME_200MS: return 200.0;

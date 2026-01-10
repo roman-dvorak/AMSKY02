@@ -42,8 +42,8 @@ private:
     
     // Helper functions
     const char* getGainString(tsl2591Gain_t gain);
-    float getGainValue(tsl2591Gain_t gain);
-    float getIntegrationTimeMs(tsl2591IntegrationTime_t integrationTime);
+    float getGainValue(tsl2591Gain_t gain) const;
+    float getIntegrationTimeMs(tsl2591IntegrationTime_t integrationTime) const;
     const char* getIntegrationTimeString(tsl2591IntegrationTime_t integrationTime);
     bool adjustGainAndIntegrationTime(uint16_t full_value);
     float calculateLuxFromRaw(uint16_t ch0_full, uint16_t ch1_ir);
@@ -63,6 +63,8 @@ public:
                        const char* &gain_str, const char* &integration_time_str);
     
     // Settings
+    float getGainValueCurrent() const { return getGainValue(current_gain); }
+    float getIntegrationTimeMsCurrent() const { return getIntegrationTimeMs(current_integration_time); }
     tsl2591Gain_t getCurrentGain() const { return current_gain; }
     tsl2591IntegrationTime_t getCurrentIntegrationTime() const { return current_integration_time; }
 };
