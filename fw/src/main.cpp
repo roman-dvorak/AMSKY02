@@ -29,8 +29,9 @@ Adafruit_SHT4x sht4 = Adafruit_SHT4x();
 // Initialize AMS TSL2591 light sensor
 AMS_TSL2591 amsSensor;
 
-// Initialize MLX90641 thermal sensor
-MLX90641 mlxSensor;
+// Initialize MLX90641 thermal sensors
+MLX90641 mlxSensor1;  // Address 0x33
+MLX90641 mlxSensor2;  // Address 0x35
 
 // Initialize configuration manager
 ConfigManager configManager;
@@ -233,11 +234,17 @@ void setup() {
     tsl_available = false;
   }
   
-  // Initialize MLX90641 thermal sensor on I2C1
-  if (mlxSensor.begin(&Wire1)) {
-    // MLX sensor is available
+  // Initialize MLX90641 thermal sensors on I2C1
+  if (mlxSensor1.begin(&Wire1, 0x33)) {
+    // MLX sensor 1 is available
   } else {
-    // MLX sensor is not available
+    // MLX sensor 1 is not available
+  }
+  
+  if (mlxSensor2.begin(&Wire1, 0x35)) {
+    // MLX sensor 2 is available
+  } else {
+    // MLX sensor 2 is not available
   }
   
   // Initialize configuration manager
@@ -268,7 +275,7 @@ void loop() {
   }
   
 // Read sensor data every 2 seconds
-  if ((sht4_available || tsl_available || mlxSensor.isAvailable()) && (current_time - last_measurement >= MEASUREMENT_INTERVAL)) {
+  if ((sht4_available || tsl_available || mlxSensor1.isAvailable() || mlxSensor2.isAvailable()) && (current_time - last_measurement >= MEASUREMENT_INTERVAL)) {
     if (sht4_available) {
       sensors_event_t humidity, temp;
       
@@ -346,20 +353,21 @@ void loop() {
         return;
       }
     }
-    if (mlxSensor.isAvailable()) {
+    // Čtení prvního MLX senzoru (0x33)
+    if (mlxSensor1.isAvailable()) {
       float vdd, ta, center;
       float corners[4];
       
-      if (mlxSensor.readThermalData(vdd, ta, corners, center)) {
+      if (mlxSensor1.readThermalData(vdd, ta, corners, center)) {
         // Output parameters
-        Serial.print("$cloud_meta,");
+        Serial.print("$cloud_meta,1,");
         Serial.print(vdd, 3);
         Serial.print(",");
         Serial.print(ta, 3);
         Serial.println();
         
         // Output corner and center data
-        Serial.print("$cloud,");
+        Serial.print("$cloud,1,");
         Serial.print(corners[0], 2); Serial.print(","); // TL
         Serial.print(corners[1], 2); Serial.print(","); // TR
         Serial.print(corners[2], 2); Serial.print(","); // BL
@@ -367,13 +375,50 @@ void loop() {
         Serial.print(center, 2);                         // CTR
         Serial.println();
 
-        // Volitelné: celá teplotní mapa (16x12 = 192 hodnot) v °C
+        // Volné: celá teplotní mapa (16x12 = 192 hodnot) v °C
         if (thrmap_streaming) {
-          const float *map = mlxSensor.getTemperatureMap();
+          const float *map = mlxSensor1.getTemperatureMap();
           if (map != nullptr) {
-            Serial.print("$thrmap");
+            Serial.print("$thrmap,1");
             for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
-              Serial.print(i == 0 ? "," : ",");
+              Serial.print(",");
+              Serial.print(map[i], 2);
+            }
+            Serial.println();
+          }
+        }
+      }
+    }
+    
+    // Čtení druhého MLX senzoru (0x35)
+    if (mlxSensor2.isAvailable()) {
+      float vdd, ta, center;
+      float corners[4];
+      
+      if (mlxSensor2.readThermalData(vdd, ta, corners, center)) {
+        // Output parameters
+        Serial.print("$cloud_meta,2,");
+        Serial.print(vdd, 3);
+        Serial.print(",");
+        Serial.print(ta, 3);
+        Serial.println();
+        
+        // Output corner and center data
+        Serial.print("$cloud,2,");
+        Serial.print(corners[0], 2); Serial.print(","); // TL
+        Serial.print(corners[1], 2); Serial.print(","); // TR
+        Serial.print(corners[2], 2); Serial.print(","); // BL
+        Serial.print(corners[3], 2); Serial.print(","); // BR
+        Serial.print(center, 2);                         // CTR
+        Serial.println();
+
+        // Volné: celá teplotní mapa (16x12 = 192 hodnot) v °C
+        if (thrmap_streaming) {
+          const float *map = mlxSensor2.getTemperatureMap();
+          if (map != nullptr) {
+            Serial.print("$thrmap,2");
+            for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
+              Serial.print(",");
               Serial.print(map[i], 2);
             }
             Serial.println();
