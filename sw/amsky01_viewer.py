@@ -43,21 +43,24 @@ PIXELS = ROWS * COLS
 
 
 def parse_thrmap(line: str):
+    """Parse $thrmap,<sensor_id>,<192 values>"""
     line = line.strip()
     if not line.startswith("$thrmap,"):
         return None
 
     parts = line.split(",")
-    if len(parts) != 1 + PIXELS:
+    # Očekáváme: $thrmap,1,val1,val2,...,val192 nebo $thrmap,2,...
+    if len(parts) < 2 + PIXELS:
         return None
 
     try:
-        values = np.array([float(x) for x in parts[1:]], dtype=np.float32)
-    except ValueError:
+        sensor_id = int(parts[1])
+        values = np.array([float(x) for x in parts[2:2+PIXELS]], dtype=np.float32)
+    except (ValueError, IndexError):
         return None
 
     frame = values.reshape((ROWS, COLS))
-    return frame
+    return sensor_id, frame
 
 
 def parse_hygro(line: str):
@@ -98,38 +101,40 @@ def parse_light(line: str):
 
 
 def parse_cloud_meta(line: str):
-    """$cloud_meta,<vdd>,<ta>"""
+    """$cloud_meta,<sensor_id>,<vdd>,<ta>"""
     line = line.strip()
     if not line.startswith("$cloud_meta,"):
         return None
     parts = line.split(",")
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None
     try:
-        vdd = float(parts[1])
-        ta = float(parts[2])
+        sensor_id = int(parts[1])
+        vdd = float(parts[2])
+        ta = float(parts[3])
     except ValueError:
         return None
-    return vdd, ta
+    return sensor_id, vdd, ta
 
 
 def parse_cloud(line: str):
-    """$cloud,TL,TR,BL,BR,CENTER"""
+    """$cloud,<sensor_id>,TL,TR,BL,BR,CENTER"""
     line = line.strip()
     if not line.startswith("$cloud,"):
         return None
     parts = line.split(",")
-    if len(parts) < 6:
+    if len(parts) < 7:
         return None
     try:
-        tl = float(parts[1])
-        tr = float(parts[2])
-        bl = float(parts[3])
-        br = float(parts[4])
-        center = float(parts[5])
+        sensor_id = int(parts[1])
+        tl = float(parts[2])
+        tr = float(parts[3])
+        bl = float(parts[4])
+        br = float(parts[5])
+        center = float(parts[6])
     except ValueError:
         return None
-    return tl, tr, bl, br, center
+    return sensor_id, tl, tr, bl, br, center
 
 
 def calculate_tsl2591_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
@@ -653,6 +658,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.debug = debug
         self.sqm_zp = sqm_zp
         self.line_buffer = ""  # Buffer pro neúplné řádky
+        self.levels_initialized = False  # Flag pro jednorázové nastavení histogram limitů
         
         # Settings
         self.settings = QtCore.QSettings("AstroMeters", "AMSKY01Viewer")
@@ -670,16 +676,20 @@ class MainWindow(QtWidgets.QMainWindow):
             print("VAROVÁNÍ: h5py není dostupné, logování vypnuto")
         
         # Pro logování sky dat potřebujeme poslední známou Ta
-        self.last_ta = None
+        self.last_ta1 = None
+        self.last_ta2 = None
         
         # Aktuální data pro JSON API
         self.current_data = {
             "timestamp": None,
             "hygro": {"temp": None, "rh": None, "dew_point": None},
             "light": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
-            "mlx": {"vdd": None, "ta": None},
-            "cloud": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
-            "thrmap": None
+            "mlx1": {"vdd": None, "ta": None},
+            "mlx2": {"vdd": None, "ta": None},
+            "cloud1": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
+            "cloud2": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
+            "thrmap1": None,
+            "thrmap2": None
         }
         
         # HTTP server
@@ -744,29 +754,54 @@ class MainWindow(QtWidgets.QMainWindow):
         graph_widget = QtWidgets.QWidget()
         hbox = QtWidgets.QHBoxLayout(graph_widget)
         
-        # Levá část: IR obraz
+        # Levá část: Dva IR obrazy vedle sebe
         self.graphics = pg.GraphicsLayoutWidget()
         self.graphics.setBackground("#1a1a1a")
         hbox.addWidget(self.graphics, 2)
 
-        self.view = self.graphics.addViewBox()
-        self.view.setAspectLocked(True)
-        self.view.invertX(True)
-        self.img_item = pg.ImageItem()
-        self.img_item.setTransformOriginPoint(COLS / 2, ROWS / 2)
-        self.img_item.setRotation(self.rotation)
-        self.view.addItem(self.img_item)
+        # První senzor (0x33)
+        self.graphics.addLabel("Sensor 1 (0x33)", colspan=2)
+        self.graphics.nextRow()
+        self.view1 = self.graphics.addViewBox()
+        self.view1.setAspectLocked(True)
+        self.view1.invertX(True)
+        self.img_item1 = pg.ImageItem()
+        self.img_item1.setTransformOriginPoint(COLS / 2, ROWS / 2)
+        self.img_item1.setRotation(self.rotation)
+        self.view1.addItem(self.img_item1)
 
-        self.hist_lut = pg.HistogramLUTItem()
-        self.graphics.addItem(self.hist_lut)
-        self.hist_lut.setImageItem(self.img_item)
+        self.hist_lut1 = pg.HistogramLUTItem()
+        self.graphics.addItem(self.hist_lut1)
+        self.hist_lut1.setImageItem(self.img_item1)
         try:
-            self.hist_lut.gradient.loadPreset("inferno")
+            self.hist_lut1.gradient.loadPreset("inferno")
         except Exception:
             pass
 
-        self.img_data = np.zeros((ROWS, COLS), dtype=np.float32)
-        self._update_image(self.img_data)
+        # Druhý senzor (0x35)
+        self.graphics.nextRow()
+        self.graphics.addLabel("Sensor 2 (0x35)", colspan=2)
+        self.graphics.nextRow()
+        self.view2 = self.graphics.addViewBox()
+        self.view2.setAspectLocked(True)
+        self.view2.invertX(True)
+        self.img_item2 = pg.ImageItem()
+        self.img_item2.setTransformOriginPoint(COLS / 2, ROWS / 2)
+        self.img_item2.setRotation(self.rotation)
+        self.view2.addItem(self.img_item2)
+
+        self.hist_lut2 = pg.HistogramLUTItem()
+        self.graphics.addItem(self.hist_lut2)
+        self.hist_lut2.setImageItem(self.img_item2)
+        try:
+            self.hist_lut2.gradient.loadPreset("inferno")
+        except Exception:
+            pass
+
+        self.img_data1 = np.zeros((ROWS, COLS), dtype=np.float32)
+        self.img_data2 = np.zeros((ROWS, COLS), dtype=np.float32)
+        self._update_image(1, self.img_data1)
+        self._update_image(2, self.img_data2)
 
         # Pravá část: textové hodnoty
         right_panel = QtWidgets.QWidget()
@@ -811,23 +846,41 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("TSL int", self.lbl_itime)
         form.addRow("SQM [mag/arcsec²]", self.lbl_sqm)
 
-        # IR senzor parametry
-        self.lbl_vdd = make_label()
-        self.lbl_ta = make_label()
-        form.addRow("MLX Vdd [V]", self.lbl_vdd)
-        form.addRow("MLX Ta [°C]", self.lbl_ta)
+        # IR senzor 1 parametry
+        self.lbl_vdd1 = make_label()
+        self.lbl_ta1 = make_label()
+        form.addRow("MLX1 Vdd [V]", self.lbl_vdd1)
+        form.addRow("MLX1 Ta [°C]", self.lbl_ta1)
 
-        # Cloud rohy/střed
-        self.lbl_tl = make_label()
-        self.lbl_tr = make_label()
-        self.lbl_bl = make_label()
-        self.lbl_br = make_label()
-        self.lbl_ctr = make_label()
-        form.addRow("TL [°C]", self.lbl_tl)
-        form.addRow("TR [°C]", self.lbl_tr)
-        form.addRow("BL [°C]", self.lbl_bl)
-        form.addRow("BR [°C]", self.lbl_br)
-        form.addRow("CTR [°C]", self.lbl_ctr)
+        # Cloud rohy/střed senzor 1
+        self.lbl_tl1 = make_label()
+        self.lbl_tr1 = make_label()
+        self.lbl_bl1 = make_label()
+        self.lbl_br1 = make_label()
+        self.lbl_ctr1 = make_label()
+        form.addRow("S1 TL [°C]", self.lbl_tl1)
+        form.addRow("S1 TR [°C]", self.lbl_tr1)
+        form.addRow("S1 BL [°C]", self.lbl_bl1)
+        form.addRow("S1 BR [°C]", self.lbl_br1)
+        form.addRow("S1 CTR [°C]", self.lbl_ctr1)
+        
+        # IR senzor 2 parametry
+        self.lbl_vdd2 = make_label()
+        self.lbl_ta2 = make_label()
+        form.addRow("MLX2 Vdd [V]", self.lbl_vdd2)
+        form.addRow("MLX2 Ta [°C]", self.lbl_ta2)
+
+        # Cloud rohy/střed senzor 2
+        self.lbl_tl2 = make_label()
+        self.lbl_tr2 = make_label()
+        self.lbl_bl2 = make_label()
+        self.lbl_br2 = make_label()
+        self.lbl_ctr2 = make_label()
+        form.addRow("S2 TL [°C]", self.lbl_tl2)
+        form.addRow("S2 TR [°C]", self.lbl_tr2)
+        form.addRow("S2 BL [°C]", self.lbl_bl2)
+        form.addRow("S2 BR [°C]", self.lbl_br2)
+        form.addRow("S2 CTR [°C]", self.lbl_ctr2)
         
         self.tabs.addTab(graph_widget, "Graph")
     
@@ -998,6 +1051,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Aktualizuje tabulku dat."""
         if self.tabs.currentIndex() == 1:  # Data table tab
             d = self.current_data
+            # Zobrazuje data z prvního senzoru pro kompatibilitu s tabulkou
             values = [
                 d["timestamp"] or "—",
                 f"{d['hygro']['temp']:.2f}" if d['hygro']['temp'] is not None else "—",
@@ -1009,13 +1063,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 d['light']['gain'] or "—",
                 d['light']['itime'] or "—",
                 f"{d['light']['sqm']:.2f}" if d['light']['sqm'] is not None else "—",
-                f"{d['mlx']['vdd']:.3f}" if d['mlx']['vdd'] is not None else "—",
-                f"{d['mlx']['ta']:.3f}" if d['mlx']['ta'] is not None else "—",
-                f"{d['cloud']['tl']:.2f}" if d['cloud']['tl'] is not None else "—",
-                f"{d['cloud']['tr']:.2f}" if d['cloud']['tr'] is not None else "—",
-                f"{d['cloud']['bl']:.2f}" if d['cloud']['bl'] is not None else "—",
-                f"{d['cloud']['br']:.2f}" if d['cloud']['br'] is not None else "—",
-                f"{d['cloud']['center']:.2f}" if d['cloud']['center'] is not None else "—",
+                f"{d['mlx1']['vdd']:.3f}" if d['mlx1']['vdd'] is not None else "—",
+                f"{d['mlx1']['ta']:.3f}" if d['mlx1']['ta'] is not None else "—",
+                f"{d['cloud1']['tl']:.2f}" if d['cloud1']['tl'] is not None else "—",
+                f"{d['cloud1']['tr']:.2f}" if d['cloud1']['tr'] is not None else "—",
+                f"{d['cloud1']['bl']:.2f}" if d['cloud1']['bl'] is not None else "—",
+                f"{d['cloud1']['br']:.2f}" if d['cloud1']['br'] is not None else "—",
+                f"{d['cloud1']['center']:.2f}" if d['cloud1']['center'] is not None else "—",
             ]
             
             for i, value in enumerate(values):
@@ -1052,14 +1106,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_data["timestamp"] = datetime.now().isoformat()
 
         if s.startswith("$thrmap,"):
-            frame = parse_thrmap(s)
-            if frame is not None:
-                self._update_image(frame)
-                self.current_data["thrmap"] = frame.flatten().tolist()
+            result = parse_thrmap(s)
+            if result is not None:
+                sensor_id, frame = result
+                self._update_image(sensor_id, frame)
                 
-                # Loguj do HDF5
-                if self.logging_enabled and self.logger and self.last_ta is not None:
-                    self.logger.log_sky(frame, self.last_ta)
+                if sensor_id == 1:
+                    self.current_data["thrmap1"] = frame.flatten().tolist()
+                    # Loguj do HDF5 pro senzor 1
+                    if self.logging_enabled and self.logger and hasattr(self, 'last_ta1') and self.last_ta1 is not None:
+                        self.logger.log_sky(frame, self.last_ta1)
+                elif sensor_id == 2:
+                    self.current_data["thrmap2"] = frame.flatten().tolist()
             return
 
         if s.startswith("$hygro,"):
@@ -1133,13 +1191,20 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.startswith("$cloud_meta,"):
             v = parse_cloud_meta(s)
             if v is not None:
-                vdd, ta = v
-                self.lbl_vdd.setText(f"{vdd:.3f}")
-                self.lbl_ta.setText(f"{ta:.3f}")
-                self.last_ta = ta
+                sensor_id, vdd, ta = v
                 
-                self.current_data["mlx"]["vdd"] = vdd
-                self.current_data["mlx"]["ta"] = ta
+                if sensor_id == 1:
+                    self.lbl_vdd1.setText(f"{vdd:.3f}")
+                    self.lbl_ta1.setText(f"{ta:.3f}")
+                    self.last_ta1 = ta
+                    self.current_data["mlx1"]["vdd"] = vdd
+                    self.current_data["mlx1"]["ta"] = ta
+                elif sensor_id == 2:
+                    self.lbl_vdd2.setText(f"{vdd:.3f}")
+                    self.lbl_ta2.setText(f"{ta:.3f}")
+                    self.last_ta2 = ta
+                    self.current_data["mlx2"]["vdd"] = vdd
+                    self.current_data["mlx2"]["ta"] = ta
                 
                 self.update_data_table()
             return
@@ -1147,42 +1212,64 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.startswith("$cloud,"):
             v = parse_cloud(s)
             if v is not None:
-                tl, tr, bl, br, ctr = v
-                self.lbl_tl.setText(f"{tl:.2f}")
-                self.lbl_tr.setText(f"{tr:.2f}")
-                self.lbl_bl.setText(f"{bl:.2f}")
-                self.lbl_br.setText(f"{br:.2f}")
-                self.lbl_ctr.setText(f"{ctr:.2f}")
+                sensor_id, tl, tr, bl, br, ctr = v
                 
-                self.current_data["cloud"]["tl"] = tl
-                self.current_data["cloud"]["tr"] = tr
-                self.current_data["cloud"]["bl"] = bl
-                self.current_data["cloud"]["br"] = br
-                self.current_data["cloud"]["center"] = ctr
+                if sensor_id == 1:
+                    self.lbl_tl1.setText(f"{tl:.2f}")
+                    self.lbl_tr1.setText(f"{tr:.2f}")
+                    self.lbl_bl1.setText(f"{bl:.2f}")
+                    self.lbl_br1.setText(f"{br:.2f}")
+                    self.lbl_ctr1.setText(f"{ctr:.2f}")
+                    self.current_data["cloud1"]["tl"] = tl
+                    self.current_data["cloud1"]["tr"] = tr
+                    self.current_data["cloud1"]["bl"] = bl
+                    self.current_data["cloud1"]["br"] = br
+                    self.current_data["cloud1"]["center"] = ctr
+                elif sensor_id == 2:
+                    self.lbl_tl2.setText(f"{tl:.2f}")
+                    self.lbl_tr2.setText(f"{tr:.2f}")
+                    self.lbl_bl2.setText(f"{bl:.2f}")
+                    self.lbl_br2.setText(f"{br:.2f}")
+                    self.lbl_ctr2.setText(f"{ctr:.2f}")
+                    self.current_data["cloud2"]["tl"] = tl
+                    self.current_data["cloud2"]["tr"] = tr
+                    self.current_data["cloud2"]["bl"] = bl
+                    self.current_data["cloud2"]["br"] = br
+                    self.current_data["cloud2"]["center"] = ctr
                 
                 self.update_data_table()
             return
 
     # --- update obrazu ---
 
-    def _update_image(self, frame: np.ndarray):
-        self.img_data[:] = frame
+    def _update_image(self, sensor_id: int, frame: np.ndarray):
+        if sensor_id == 1:
+            self.img_data1[:] = frame
+            img_item = self.img_item1
+            hist_lut = self.hist_lut1
+        elif sensor_id == 2:
+            self.img_data2[:] = frame
+            img_item = self.img_item2
+            hist_lut = self.hist_lut2
+        else:
+            return
 
         if self.vmin is None or self.vmax is None:
-            vmin = float(np.nanmin(self.img_data))
-            vmax = float(np.nanmax(self.img_data))
+            # Auto mode - vypočti min/max z dat
             auto_levels = True
         else:
-            vmin = self.vmin
-            vmax = self.vmax
+            # Fixed mode - použij uživatelem zadané hodnoty
             auto_levels = False
 
-        self.img_item.setImage(self.img_data, autoLevels=auto_levels)
+        img_item.setImage(frame, autoLevels=auto_levels)
 
-        try:
-            self.hist_lut.setLevels(vmin, vmax)
-        except Exception:
-            pass
+        if not auto_levels and not self.levels_initialized:
+            # Nastav limity pouze jednou při prvním snímku
+            try:
+                hist_lut.setLevels(self.vmin, self.vmax)
+                self.levels_initialized = True
+            except Exception:
+                pass
     
     def closeEvent(self, event):
         """Při zavírání okna zavři i HDF5 soubor a HTTP server."""
