@@ -754,54 +754,31 @@ class MainWindow(QtWidgets.QMainWindow):
         graph_widget = QtWidgets.QWidget()
         hbox = QtWidgets.QHBoxLayout(graph_widget)
         
-        # Levá část: Dva IR obrazy vedle sebe
+        # Levá část: Jeden IR obraz (kombinovaná matice)
         self.graphics = pg.GraphicsLayoutWidget()
         self.graphics.setBackground("#1a1a1a")
         hbox.addWidget(self.graphics, 2)
 
-        # První senzor (0x33)
-        self.graphics.addLabel("Sensor 1 (0x33)", colspan=2)
-        self.graphics.nextRow()
-        self.view1 = self.graphics.addViewBox()
-        self.view1.setAspectLocked(True)
-        self.view1.invertX(True)
-        self.img_item1 = pg.ImageItem()
-        self.img_item1.setTransformOriginPoint(COLS / 2, ROWS / 2)
-        self.img_item1.setRotation(self.rotation)
-        self.view1.addItem(self.img_item1)
+        # Jeden kombinovaný obraz
+        self.view = self.graphics.addViewBox()
+        self.view.setAspectLocked(True)
+        self.img_item = pg.ImageItem()
+        self.view.addItem(self.img_item)
 
-        self.hist_lut1 = pg.HistogramLUTItem()
-        self.graphics.addItem(self.hist_lut1)
-        self.hist_lut1.setImageItem(self.img_item1)
+        self.hist_lut = pg.HistogramLUTItem()
+        self.graphics.addItem(self.hist_lut)
+        self.hist_lut.setImageItem(self.img_item)
         try:
-            self.hist_lut1.gradient.loadPreset("inferno")
+            self.hist_lut.gradient.loadPreset("inferno")
         except Exception:
             pass
 
-        # Druhý senzor (0x35)
-        self.graphics.nextRow()
-        self.graphics.addLabel("Sensor 2 (0x35)", colspan=2)
-        self.graphics.nextRow()
-        self.view2 = self.graphics.addViewBox()
-        self.view2.setAspectLocked(True)
-        self.view2.invertX(True)
-        self.img_item2 = pg.ImageItem()
-        self.img_item2.setTransformOriginPoint(COLS / 2, ROWS / 2)
-        self.img_item2.setRotation(self.rotation)
-        self.view2.addItem(self.img_item2)
-
-        self.hist_lut2 = pg.HistogramLUTItem()
-        self.graphics.addItem(self.hist_lut2)
-        self.hist_lut2.setImageItem(self.img_item2)
-        try:
-            self.hist_lut2.gradient.loadPreset("inferno")
-        except Exception:
-            pass
-
+        # Data pro oba senzory - po otočení bude každý 16x12 -> 12x16
+        # Spojíme je vedle sebe: 12x32 (12 řádků, 32 sloupců)
         self.img_data1 = np.zeros((ROWS, COLS), dtype=np.float32)
         self.img_data2 = np.zeros((ROWS, COLS), dtype=np.float32)
-        self._update_image(1, self.img_data1)
-        self._update_image(2, self.img_data2)
+        self.combined_data = np.zeros((ROWS, COLS * 2), dtype=np.float32)
+        self._update_combined_image()
 
         # Pravá část: textové hodnoty
         right_panel = QtWidgets.QWidget()
@@ -1243,17 +1220,28 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- update obrazu ---
 
     def _update_image(self, sensor_id: int, frame: np.ndarray):
+        # Ulož data pro příslušný senzor
         if sensor_id == 1:
             self.img_data1[:] = frame
-            img_item = self.img_item1
-            hist_lut = self.hist_lut1
         elif sensor_id == 2:
             self.img_data2[:] = frame
-            img_item = self.img_item2
-            hist_lut = self.hist_lut2
         else:
             return
-
+        
+        # Aktualizuj kombinovaný obraz
+        self._update_combined_image()
+    
+    def _update_combined_image(self):
+        """Spojí oba senzory do jedné matice s otočením o 90° doleva."""
+        # Otočení o 90° doleva = rot90(frame, k=1)
+        # frame je 12x16, po otočení bude 16x12
+        rotated1 = np.rot90(self.img_data1, k=1)
+        rotated2 = np.rot90(self.img_data2, k=1)
+        
+        # Spojíme oba obrazy vedle sebe horizontálně
+        # rotated1: 16x12, rotated2: 16x12 -> combined: 16x24
+        self.combined_data = np.hstack([rotated1, rotated2])
+        
         if self.vmin is None or self.vmax is None:
             # Auto mode - vypočti min/max z dat
             auto_levels = True
@@ -1261,12 +1249,12 @@ class MainWindow(QtWidgets.QMainWindow):
             # Fixed mode - použij uživatelem zadané hodnoty
             auto_levels = False
 
-        img_item.setImage(frame, autoLevels=auto_levels)
+        self.img_item.setImage(self.combined_data, autoLevels=auto_levels)
 
         if not auto_levels and not self.levels_initialized:
             # Nastav limity pouze jednou při prvním snímku
             try:
-                hist_lut.setLevels(self.vmin, self.vmax)
+                self.hist_lut.setLevels(self.vmin, self.vmax)
                 self.levels_initialized = True
             except Exception:
                 pass
