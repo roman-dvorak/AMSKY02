@@ -41,6 +41,11 @@ ROWS = 12
 COLS = 16
 PIXELS = ROWS * COLS
 
+# Korekční parametry
+TAU_LENS = 0.90
+BETA = 0.2
+K_ATM = 0.03
+
 
 def parse_thrmap(line: str):
     """Parse $thrmap,<sensor_id>,<192 values>"""
@@ -135,6 +140,59 @@ def parse_cloud(line: str):
     except ValueError:
         return None
     return sensor_id, tl, tr, bl, br, center
+
+
+def dewpoint_magnus(Ta_C: float, RH_pct: float) -> float:
+    """Výpočet rosného bodu pomocí Magnusovy rovnice."""
+    a = 17.27
+    b = 237.7
+    alpha = ((a * Ta_C) / (b + Ta_C)) + np.log(RH_pct / 100.0)
+    Td_C = (b * alpha) / (a - alpha)
+    return Td_C
+
+
+def apply_sky_temperature_correction(T_meas_C: np.ndarray, Ta_C: float, RH_pct: float, 
+                                     Tchip_C: float, tau_lens: float = TAU_LENS, 
+                                     beta: float = BETA, k_atm: float = K_ATM) -> np.ndarray:
+    """
+    Aplikuje atmosférickou a optickou korekci na měřené teploty.
+    
+    Args:
+        T_meas_C: Měřené teploty v °C (2D pole)
+        Ta_C: Teplota vzduchu v °C
+        RH_pct: Relativní vlhkost v %
+        Tchip_C: Teplota čipu (MLX Ta) v °C
+        tau_lens: Transmisivita čočky (default 0.90)
+        beta: Korekční faktor pro teplotu čočky (default 0.2)
+        k_atm: Atmosférický koeficient (default 0.03)
+    
+    Returns:
+        T_sky_corr_C: Korigované teploty v °C (2D pole)
+    """
+    # Výpočet rosného bodu
+    Td_C = dewpoint_magnus(Ta_C, RH_pct)
+    
+    # Výpočet W s omezením na rozsah 0-30
+    W = np.clip(Ta_C - Td_C, 0, 30)
+    
+    # Atmosférická transmisivita
+    tau_atm = np.exp(-k_atm * (30 - W))
+    
+    # Teplota čočky
+    T_lens_C = Ta_C + beta * (Tchip_C - Ta_C)
+    
+    # Stefanovy-Boltzmannovy radiace
+    R_atm = (Ta_C + 273.15) ** 4
+    R_lens = (T_lens_C + 273.15) ** 4
+    
+    # Korekce pro každý pixel
+    R_meas = (T_meas_C + 273.15) ** 4
+    R_sky = (R_meas - tau_lens * (1 - tau_atm) * R_atm - (1 - tau_lens) * R_lens) / (tau_lens * tau_atm)
+    
+    # Převod zpět na teplotu
+    T_sky_corr_C = np.power(R_sky, 0.25) - 273.15
+    
+    return T_sky_corr_C
 
 
 def calculate_tsl2591_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
@@ -679,6 +737,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_ta1 = None
         self.last_ta2 = None
         
+        # Režim zobrazení (raw vs calibrated)
+        self.show_calibrated = False
+        
+        # Poslední známé hodnoty pro korekci
+        self.last_ambient_temp = 20.0  # Ta
+        self.last_humidity = 50.0       # RH
+        
         # Aktuální data pro JSON API
         self.current_data = {
             "timestamp": None,
@@ -721,6 +786,14 @@ class MainWindow(QtWidgets.QMainWindow):
         exit_action = QtGui.QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
+        # View menu
+        view_menu = menubar.addMenu("&View")
+        
+        self.calibrated_action = QtGui.QAction("Show &Calibrated Temperature", self, checkable=True)
+        self.calibrated_action.setChecked(self.show_calibrated)
+        self.calibrated_action.triggered.connect(self.toggle_calibrated)
+        view_menu.addAction(self.calibrated_action)
 
         # --- Central widget s tab widgetem ---
         self.tabs = QtWidgets.QTabWidget()
@@ -764,6 +837,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.view.setAspectLocked(True)
         self.img_item = pg.ImageItem()
         self.view.addItem(self.img_item)
+        
+        # Text label pro zobrazení hodnoty pod kurzorem
+        self.value_label = pg.TextItem(anchor=(0, 1), color='w', fill=(0, 0, 0, 150))
+        self.view.addItem(self.value_label)
+        self.value_label.setPos(0, 0)
+        
+        # Připojení signálu pro pohyb myši
+        self.img_item.hoverEvent = self.image_hover_event
 
         self.hist_lut = pg.HistogramLUTItem()
         self.graphics.addItem(self.hist_lut)
@@ -861,6 +942,30 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.tabs.addTab(graph_widget, "Graph")
     
+    def image_hover_event(self, event):
+        """Zobrazí hodnotu pod kurzorem."""
+        if event.isExit():
+            self.value_label.setVisible(False)
+            return
+        
+        pos = event.pos()
+        i, j = int(pos.y()), int(pos.x())
+        
+        # Kontrola, zda je pozice v rámci obrazu
+        if 0 <= i < self.combined_data.shape[0] and 0 <= j < self.combined_data.shape[1]:
+            value = self.combined_data[i, j]
+            
+            # Určení, který senzor
+            sensor_width = self.combined_data.shape[1] // 2
+            sensor_id = 1 if j < sensor_width else 2
+            
+            mode_str = "Cal" if self.show_calibrated else "Raw"
+            self.value_label.setText(f"S{sensor_id} [{i},{j % sensor_width}]: {value:.2f}°C ({mode_str})")
+            self.value_label.setPos(j, i)
+            self.value_label.setVisible(True)
+        else:
+            self.value_label.setVisible(False)
+    
     def create_table_tab(self):
         """Vytvoří druhou kartu s tabulkou dat."""
         table_widget = QtWidgets.QWidget()
@@ -946,7 +1051,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.logger.close()
                 log_path = self.settings.value("log_path", ".")
                 self.logger = HDF5Logger(self.device_id, Path(log_path))
-                self._update_log_status()
+        self._update_log_status()
+    
+    def toggle_calibrated(self, checked: bool):
+        """Přepne mezi raw a kalibrovanými teplotami."""
+        self.show_calibrated = checked
+        # Překresli obraz s aktuálním režimem
+        self._update_combined_image()
     
     def toggle_logging(self, checked: bool):
         """Zapne/vypne logování."""
@@ -1105,6 +1216,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.lbl_rh.setText(f"{rh:.2f}")
                 self.lbl_dew.setText(f"{dew:.2f}")
                 
+                # Ulož hodnoty pro korekci
+                self.last_ambient_temp = t
+                self.last_humidity = rh
+                
                 self.current_data["hygro"]["temp"] = t
                 self.current_data["hygro"]["rh"] = rh
                 self.current_data["hygro"]["dew_point"] = dew
@@ -1237,6 +1352,26 @@ class MainWindow(QtWidgets.QMainWindow):
         # frame je 12x16, po otočení bude 16x12
         rotated1 = np.rot90(self.img_data1, k=1)
         rotated2 = np.rot90(self.img_data2, k=1)
+        
+        # Aplikuj korekci, pokud je zapnuta
+        if self.show_calibrated:
+            # Potřebujeme Ta (ambient temp) a RH (humidity) a Tchip (Ta z MLX)
+            # Pro senzor 1 použijeme last_ta1, pro senzor 2 last_ta2
+            if self.last_ta1 is not None:
+                rotated1 = apply_sky_temperature_correction(
+                    rotated1, 
+                    self.last_ambient_temp, 
+                    self.last_humidity, 
+                    self.last_ta1
+                )
+            
+            if self.last_ta2 is not None:
+                rotated2 = apply_sky_temperature_correction(
+                    rotated2, 
+                    self.last_ambient_temp, 
+                    self.last_humidity, 
+                    self.last_ta2
+                )
         
         # Spojíme oba obrazy vedle sebe horizontálně
         # rotated1: 16x12, rotated2: 16x12 -> combined: 16x24
