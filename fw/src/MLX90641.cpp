@@ -26,9 +26,9 @@ bool MLX90641::begin(TwoWire *wire, uint8_t addr)
         return false;
     }
 
-    // Inicializace I2C driveru knihovny (frekvence nastavíme na 400 kHz)
+    // Inicializace I2C driveru knihovny (frekvence nastavíme na 1 MHz)
     MLX90641_I2CInit();
-    MLX90641_I2CFreqSet(400);
+    MLX90641_I2CFreqSet(1000);
 
     // Ověření I2C spojení jednoduchým přenosem
     _wire->beginTransmission(i2cAddr);
@@ -59,13 +59,24 @@ bool MLX90641::begin(TwoWire *wire, uint8_t addr)
         return false;
     }
 
-    // Nastavíme refresh rate na 4 Hz (011b), aby byl rozumný kompromis mezi šumem a rychlostí
+    // Nastavíme refresh rate na 4 Hz (011b)
     status = MLX90641_SetRefreshRate(i2cAddr, 0b011);
     if (status != 0)
     {
         Serial.print("# MLX90641 (0x");
         Serial.print(i2cAddr, HEX);
         Serial.print(") SetRefreshRate failed, err=");
+        Serial.println(status);
+        // Nebereme jako fatální chybu
+    }
+
+    // Nastavíme ADC rozlišení na 19 bit (3) pro nejnižší šum
+    status = MLX90641_SetResolution(i2cAddr, 3);
+    if (status != 0)
+    {
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.print(") SetResolution failed, err=");
         Serial.println(status);
         // Nebereme jako fatální chybu
     }

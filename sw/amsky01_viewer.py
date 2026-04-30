@@ -854,11 +854,13 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
-        # Data pro oba senzory - po otočení bude každý 16x12 -> 12x16
-        # Spojíme je vedle sebe: 12x32 (12 řádků, 32 sloupců)
-        self.img_data1 = np.zeros((ROWS, COLS), dtype=np.float32)
-        self.img_data2 = np.zeros((ROWS, COLS), dtype=np.float32)
-        self.combined_data = np.zeros((ROWS, COLS * 2), dtype=np.float32)
+        # Data pro oba senzory - po otočení bude každý (12,16) -> (16,12)
+        # Spojíme je vedle sebe: (16,24)
+        self.img_data1 = np.full((ROWS, COLS), np.nan, dtype=np.float32)
+        self.img_data2 = np.full((ROWS, COLS), np.nan, dtype=np.float32)
+        self.sensor1_ready = False
+        self.sensor2_ready = False
+        self.combined_data = np.full((COLS, ROWS * 2), np.nan, dtype=np.float32)
         self._update_combined_image()
 
         # Pravá část: textové hodnoty
@@ -949,7 +951,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         
         pos = event.pos()
-        i, j = int(pos.y()), int(pos.x())
+        # pos.x() je sloupec (j), pos.y() je řádek (i)
+        j, i = int(pos.x()), int(pos.y())
         
         # Kontrola, zda je pozice v rámci obrazu
         if 0 <= i < self.combined_data.shape[0] and 0 <= j < self.combined_data.shape[1]:
@@ -958,9 +961,10 @@ class MainWindow(QtWidgets.QMainWindow):
             # Určení, který senzor
             sensor_width = self.combined_data.shape[1] // 2
             sensor_id = 1 if j < sensor_width else 2
+            local_j = j if sensor_id == 1 else j - sensor_width
             
             mode_str = "Cal" if self.show_calibrated else "Raw"
-            self.value_label.setText(f"S{sensor_id} [{i},{j % sensor_width}]: {value:.2f}°C ({mode_str})")
+            self.value_label.setText(f"S{sensor_id} [{i},{local_j}]: {value:.2f}°C ({mode_str})")
             self.value_label.setPos(j, i)
             self.value_label.setVisible(True)
         else:
@@ -1335,11 +1339,13 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- update obrazu ---
 
     def _update_image(self, sensor_id: int, frame: np.ndarray):
-        # Ulož data pro příslušný senzor
+        # Ulož data pro příslušný senzor a označ ho jako připravený
         if sensor_id == 1:
             self.img_data1[:] = frame
+            self.sensor1_ready = True
         elif sensor_id == 2:
             self.img_data2[:] = frame
+            self.sensor2_ready = True
         else:
             return
         
@@ -1348,6 +1354,10 @@ class MainWindow(QtWidgets.QMainWindow):
     
     def _update_combined_image(self):
         """Spojí oba senzory do jedné matice s otočením o 90° doleva."""
+        # Nezobrazuj nic, dokud žádný senzor nemá data
+        if not self.sensor1_ready and not self.sensor2_ready:
+            return
+        
         # Otočení o 90° doleva = rot90(frame, k=1)
         # frame je 12x16, po otočení bude 16x12
         rotated1 = np.rot90(self.img_data1, k=1)
@@ -1378,15 +1388,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.combined_data = np.hstack([rotated1, rotated2])
         
         if self.vmin is None or self.vmax is None:
-            # Auto mode - vypočti min/max z dat
-            auto_levels = True
+            # Auto mode - vypočti min/max ignorujíce NaN (nepřipravené senzory)
+            valid = self.combined_data[np.isfinite(self.combined_data)]
+            if valid.size == 0:
+                return
+            levels = (float(valid.min()), float(valid.max()))
+            self.img_item.setImage(self.combined_data, autoLevels=False, levels=levels)
         else:
             # Fixed mode - použij uživatelem zadané hodnoty
-            auto_levels = False
+            self.img_item.setImage(self.combined_data, autoLevels=False)
 
-        self.img_item.setImage(self.combined_data, autoLevels=auto_levels)
-
-        if not auto_levels and not self.levels_initialized:
+        if (self.vmin is not None and self.vmax is not None) and not self.levels_initialized:
             # Nastav limity pouze jednou při prvním snímku
             try:
                 self.hist_lut.setLevels(self.vmin, self.vmax)

@@ -49,7 +49,9 @@ const float MY_PI = 3.14159265359;
 bool sht4_available = false;
 bool tsl_available = false;
 unsigned long last_measurement = 0;
-const unsigned long MEASUREMENT_INTERVAL = 2000; // 2 seconds
+const unsigned long MEASUREMENT_INTERVAL = 500; // 500 ms (2 Hz)
+unsigned long last_tsl_measurement = 0;
+const unsigned long TSL_MEASUREMENT_INTERVAL = 2000; // 2 s
 
 // Režim posílání celé IR mapy po UARTu
 bool thrmap_streaming = false;
@@ -212,6 +214,7 @@ void setup() {
   Wire1.setSDA(SDA_PIN);
   Wire1.setSCL(SCL_PIN);
   Wire1.begin();
+  Wire1.setClock(1000000); // 1 MHz Fast Mode Plus
   delay(100);
   
   // Initialize SHT45 sensor on I2C1
@@ -227,12 +230,14 @@ void setup() {
     Serial.println("# SHT4x sensor initialization failed");
   }
   
-  // Initialize AMS TSL2591 light sensor on I2C1
+  // Initialize AMS TSL2591 light sensor on I2C1 (max. 400 kHz)
+  Wire1.setClock(400000);
   if (amsSensor.begin(&Wire1)) {
     tsl_available = true;
   } else {
     tsl_available = false;
   }
+  Wire1.setClock(1000000); // zpět na 1 MHz
   
   // Initialize MLX90641 thermal sensors on I2C1
   if (mlxSensor1.begin(&Wire1, 0x33)) {
@@ -274,7 +279,7 @@ void loop() {
     last_trigger_blink = current_time;
   }
   
-// Read sensor data every 2 seconds
+// Read sensor data at 2 Hz (500 ms)
   if ((sht4_available || tsl_available || mlxSensor1.isAvailable() || mlxSensor2.isAvailable()) && (current_time - last_measurement >= MEASUREMENT_INTERVAL)) {
     if (sht4_available) {
       sensors_event_t humidity, temp;
@@ -304,7 +309,8 @@ void loop() {
       }
     }
     
-    if (tsl_available && amsSensor.isAvailable()) {
+    if (tsl_available && amsSensor.isAvailable() && (current_time - last_tsl_measurement >= TSL_MEASUREMENT_INTERVAL)) {
+      Wire1.setClock(400000); // TSL2591 max. 400 kHz
       uint32_t ulux;
       uint16_t full_raw, ir_raw;
       const char* gain_str;
@@ -349,9 +355,13 @@ void loop() {
         Serial.println();
       } else {
         // Settings were adjusted, skip this measurement
+        Wire1.setClock(1000000); // zpět na 1 MHz
+        last_tsl_measurement = current_time;
         last_measurement = current_time;
         return;
       }
+      Wire1.setClock(1000000); // zpět na 1 MHz
+      last_tsl_measurement = current_time;
     }
     // Čtení prvního MLX senzoru (0x33)
     if (mlxSensor1.isAvailable()) {

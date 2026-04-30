@@ -33,7 +33,7 @@ int MLX90641_I2CRead(uint8_t slaveAddr, uint16_t startAddress,
                      uint16_t nMemAddressRead, uint16_t *data)
 {
     const uint8_t addr = slaveAddr; // Arduino používá 7bit adresu
-    const uint16_t MAX_WORDS_PER_CHUNK = 16; // 16 slov = 32 bajtů (I2C buffer)
+    const uint16_t MAX_WORDS_PER_CHUNK = 32; // 32 slov = 64 bajtů (RP2040 Wire buffer = 256 B)
 
     uint16_t wordsRead = 0;
 
@@ -72,7 +72,6 @@ int MLX90641_I2CRead(uint8_t slaveAddr, uint16_t startAddress,
         }
 
         wordsRead += chunkWords;
-        delay(2); // krátká pauza mezi bloky
     }
 
     return 0;
