@@ -1,4 +1,4 @@
-"""Melexis AMSKY01 viewer from serial data
+"""Melexis AMSKY01 viewer from serial data or HDF5 log replay
 
 Shows:
 - IR mapu z MLX90641 ($thrmap)
@@ -13,9 +13,12 @@ Závislosti:
 Spuštění (příklad):
     python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200
     python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
+    python amsky01_viewer.py --replay AMSKY01_20260502_18.h5
+    python amsky01_viewer.py --replay AMSKY01_20260502_18.h5 --replay-speed 5
 """
 
 import argparse
+import os
 import sys
 import time
 import json
@@ -429,24 +432,27 @@ def calculate_normalized_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
 
 class HDF5Logger:
     """Třída pro logování dat do HDF5 souborů (hodinové dávky)."""
-    
+
     def __init__(self, device_id: str, base_path: Path = None):
         self.device_id = device_id
         self.base_path = base_path or Path(".")
         self.base_path.mkdir(parents=True, exist_ok=True)
-        
+
         self.current_file = None
         self.current_hour = None
-        
-        # Datasety
-        self.sky_data = None
-        self.sky_time = None
-        self.sky_temp = None
-        
+
+        # Datasety – oba senzory ukládány odděleně jako /sky1 a /sky2
+        self.sky1_data = None
+        self.sky1_time = None
+        self.sky1_temp = None
+        self.sky2_data = None
+        self.sky2_time = None
+        self.sky2_temp = None
+
         self.hygro_temp = None
         self.hygro_hum = None
         self.hygro_time = None
-        
+
         self.light_all = None
         self.light_ir = None
         self.light_gain = None
@@ -486,27 +492,27 @@ class HDF5Logger:
     def _init_datasets(self):
         """Inicializuje nebo otevře datasety v aktuálním souboru."""
         f = self.current_file
-        
-        # Skupina /sky
-        if "sky" not in f:
-            sky_grp = f.create_group("sky")
-            self.sky_data = sky_grp.create_dataset(
-                "data", shape=(0, ROWS, COLS), maxshape=(None, ROWS, COLS),
-                dtype=np.float32, chunks=(1, ROWS, COLS)
-            )
-            self.sky_time = sky_grp.create_dataset(
-                "time", shape=(0,), maxshape=(None,),
-                dtype=np.int64, chunks=(1024,)
-            )
-            self.sky_temp = sky_grp.create_dataset(
-                "temp", shape=(0,), maxshape=(None,),
-                dtype=np.float32, chunks=(1024,)
-            )
-        else:
-            sky_grp = f["sky"]
-            self.sky_data = sky_grp["data"]
-            self.sky_time = sky_grp["time"]
-            self.sky_temp = sky_grp["temp"]
+
+        # Skupiny /sky1 a /sky2 (každý senzor zvlášť)
+        for sid in (1, 2):
+            gname = f"sky{sid}"
+            if gname not in f:
+                grp = f.create_group(gname)
+                setattr(self, f"sky{sid}_data", grp.create_dataset(
+                    "data", shape=(0, ROWS, COLS), maxshape=(None, ROWS, COLS),
+                    dtype=np.float32, chunks=(1, ROWS, COLS)
+                ))
+                setattr(self, f"sky{sid}_time", grp.create_dataset(
+                    "time", shape=(0,), maxshape=(None,), dtype=np.int64, chunks=(1024,)
+                ))
+                setattr(self, f"sky{sid}_temp", grp.create_dataset(
+                    "temp", shape=(0,), maxshape=(None,), dtype=np.float32, chunks=(1024,)
+                ))
+            else:
+                grp = f[gname]
+                setattr(self, f"sky{sid}_data", grp["data"])
+                setattr(self, f"sky{sid}_time", grp["time"])
+                setattr(self, f"sky{sid}_temp", grp["temp"])
         
         # Skupina /hygro
         if "hygro" not in f:
@@ -564,23 +570,24 @@ class HDF5Logger:
         """Vrací aktuální Unix timestamp v nanosekundách."""
         return int(time.time() * 1e9)
     
-    def log_sky(self, frame: np.ndarray, temp: float):
-        """Zaloguje IR snímek do /sky."""
+    def log_sky(self, sensor_id: int, frame: np.ndarray, temp: float):
+        """Zaloguje IR snímek do /sky1 nebo /sky2."""
         self._ensure_file()
-        
+
         timestamp = self._get_timestamp_ns()
-        
-        # Rozšíř datasety o jeden prvek
-        n = self.sky_data.shape[0]
-        self.sky_data.resize((n + 1, ROWS, COLS))
-        self.sky_time.resize((n + 1,))
-        self.sky_temp.resize((n + 1,))
-        
-        # Zapiš data
-        self.sky_data[n] = frame
-        self.sky_time[n] = timestamp
-        self.sky_temp[n] = temp
-        
+        data_ds = getattr(self, f"sky{sensor_id}_data")
+        time_ds = getattr(self, f"sky{sensor_id}_time")
+        temp_ds = getattr(self, f"sky{sensor_id}_temp")
+
+        n = data_ds.shape[0]
+        data_ds.resize((n + 1, ROWS, COLS))
+        time_ds.resize((n + 1,))
+        temp_ds.resize((n + 1,))
+
+        data_ds[n] = frame
+        time_ds[n] = timestamp
+        temp_ds[n] = temp
+
         self.current_file.flush()
     
     def log_hygro(self, temp: float, hum: float):
@@ -706,8 +713,9 @@ class ConfigDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, ser: serial.Serial, vmin=None, vmax=None, rotation=0.0, debug=False,
-                 enable_logging=False, enable_http_api=False, device_id="AMSKY01", log_path=None, sqm_zp=24.0, parent=None):
+    def __init__(self, ser=None, vmin=None, vmax=None, rotation=0.0, debug=False,
+                 enable_logging=False, enable_http_api=False, device_id="AMSKY01", log_path=None, sqm_zp=24.0,
+                 replay_file=None, replay_speed=1.0, parent=None):
         super().__init__(parent)
         self.ser = ser
         self.vmin = vmin
@@ -715,8 +723,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rotation = rotation
         self.debug = debug
         self.sqm_zp = sqm_zp
-        self.line_buffer = ""  # Buffer pro neúplné řádky
-        self.levels_initialized = False  # Flag pro jednorázové nastavení histogram limitů
+        self.line_buffer = ""
+        self.levels_initialized = False
+
+        # Replay mode
+        self.replay_file = replay_file
+        self.replay_speed = replay_speed
+        self.replay_data = None
+        self.replay_frame_idx = 0
+        self.replay_playing = False
+        self.replay_start_real = None
+        self.replay_start_data_ns = None
         
         # Settings
         self.settings = QtCore.QSettings("AstroMeters", "AMSKY01Viewer")
@@ -769,14 +786,22 @@ class MainWindow(QtWidgets.QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
         
+        open_replay_action = QtGui.QAction("&Open Replay File...", self)
+        open_replay_action.setShortcut("Ctrl+O")
+        open_replay_action.triggered.connect(self._open_replay_file_dialog)
+        open_replay_action.setEnabled(HDF5_AVAILABLE)
+        file_menu.addAction(open_replay_action)
+
+        file_menu.addSeparator()
+
         self.log_action = QtGui.QAction("Start &Logging", self, checkable=True)
         self.log_action.setChecked(self.logging_enabled)
         self.log_action.setEnabled(HDF5_AVAILABLE)
         self.log_action.triggered.connect(self.toggle_logging)
         file_menu.addAction(self.log_action)
-        
+
         file_menu.addSeparator()
-        
+
         config_action = QtGui.QAction("&Configuration...", self)
         config_action.triggered.connect(self.show_config)
         file_menu.addAction(config_action)
@@ -811,11 +836,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # Status bar
         self.statusBar().showMessage("Not logging")
 
-        # Timer na polling seriáku
+        # Timer na polling seriáku / replay
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(50)  # ms
-        self.timer.timeout.connect(self.poll_serial)
+        self.timer.timeout.connect(self._on_poll_timer)
         self.timer.start()
+
+        # Načti replay soubor pokud byl zadán při startu
+        if self.replay_file and HDF5_AVAILABLE:
+            QtCore.QTimer.singleShot(100, lambda: self._load_replay_data(self.replay_file))
 
         # Start HTTP API if requested
         if self.enable_http_api_on_start:
@@ -825,8 +854,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def create_graph_tab(self):
         """Vytvoří první kartu s grafem."""
         graph_widget = QtWidgets.QWidget()
-        hbox = QtWidgets.QHBoxLayout(graph_widget)
-        
+        main_vbox = QtWidgets.QVBoxLayout(graph_widget)
+        main_vbox.setContentsMargins(0, 0, 0, 0)
+        main_vbox.setSpacing(0)
+
+        content_widget = QtWidgets.QWidget()
+        hbox = QtWidgets.QHBoxLayout(content_widget)
+        main_vbox.addWidget(content_widget, 1)
+
         # Levá část: Jeden IR obraz (kombinovaná matice)
         self.graphics = pg.GraphicsLayoutWidget()
         self.graphics.setBackground("#1a1a1a")
@@ -942,8 +977,57 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("S2 BR [°C]", self.lbl_br2)
         form.addRow("S2 CTR [°C]", self.lbl_ctr2)
         
+        # --- Replay controls (skryté dokud není načten soubor) ---
+        self.replay_controls = QtWidgets.QWidget()
+        self.replay_controls.setStyleSheet(
+            "background-color: #2a2a2a; border-top: 1px solid #444;"
+        )
+        rc_layout = QtWidgets.QVBoxLayout(self.replay_controls)
+        rc_layout.setContentsMargins(6, 4, 6, 4)
+        rc_layout.setSpacing(3)
+
+        btn_row = QtWidgets.QHBoxLayout()
+
+        self.replay_rewind_btn = QtWidgets.QPushButton("⏮")
+        self.replay_rewind_btn.setFixedWidth(36)
+        self.replay_rewind_btn.setToolTip("Přesun na začátek")
+        self.replay_rewind_btn.clicked.connect(self._replay_rewind)
+        btn_row.addWidget(self.replay_rewind_btn)
+
+        self.replay_play_btn = QtWidgets.QPushButton("▶")
+        self.replay_play_btn.setFixedWidth(36)
+        self.replay_play_btn.setToolTip("Přehrát / Pauza")
+        self.replay_play_btn.clicked.connect(self._toggle_replay_play)
+        btn_row.addWidget(self.replay_play_btn)
+
+        self.replay_frame_label = QtWidgets.QLabel("0 / 0")
+        self.replay_frame_label.setMinimumWidth(80)
+        btn_row.addWidget(self.replay_frame_label)
+
+        btn_row.addWidget(QtWidgets.QLabel("Rychlost:"))
+        self.replay_speed_combo = QtWidgets.QComboBox()
+        self.replay_speed_combo.addItems(["0.5x", "1x", "2x", "5x", "10x", "20x"])
+        self.replay_speed_combo.setCurrentIndex(1)
+        self.replay_speed_combo.currentTextChanged.connect(self._set_replay_speed)
+        btn_row.addWidget(self.replay_speed_combo)
+
+        self.replay_time_label = QtWidgets.QLabel("–")
+        self.replay_time_label.setStyleSheet("color: #aaaaff; font-family: monospace;")
+        btn_row.addWidget(self.replay_time_label)
+        btn_row.addStretch()
+
+        rc_layout.addLayout(btn_row)
+
+        self.replay_slider = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
+        self.replay_slider.setRange(0, 0)
+        self.replay_slider.sliderMoved.connect(self._seek_replay)
+        rc_layout.addWidget(self.replay_slider)
+
+        self.replay_controls.setVisible(False)
+        main_vbox.addWidget(self.replay_controls)
+
         self.tabs.addTab(graph_widget, "Graph")
-    
+
     def image_hover_event(self, event):
         """Zobrazí hodnotu pod kurzorem."""
         if event.isExit():
@@ -1170,6 +1254,8 @@ class MainWindow(QtWidgets.QMainWindow):
     # --- seriový polling ---
 
     def poll_serial(self):
+        if self.ser is None:
+            return
         try:
             # Čti všechny dostupné data
             while self.ser.in_waiting:
@@ -1205,11 +1291,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 if sensor_id == 1:
                     self.current_data["thrmap1"] = frame.flatten().tolist()
-                    # Loguj do HDF5 pro senzor 1
-                    if self.logging_enabled and self.logger and hasattr(self, 'last_ta1') and self.last_ta1 is not None:
-                        self.logger.log_sky(frame, self.last_ta1)
+                    if self.logging_enabled and self.logger and self.last_ta1 is not None:
+                        self.logger.log_sky(1, frame, self.last_ta1)
                 elif sensor_id == 2:
                     self.current_data["thrmap2"] = frame.flatten().tolist()
+                    if self.logging_enabled and self.logger and self.last_ta2 is not None:
+                        self.logger.log_sky(2, frame, self.last_ta2)
             return
 
         if s.startswith("$hygro,"):
@@ -1406,6 +1493,227 @@ class MainWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
     
+    # --- Replay ---
+
+    def _open_replay_file_dialog(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Otevřít log soubor", ".", "HDF5 soubory (*.h5 *.hdf5)"
+        )
+        if path:
+            self._load_replay_data(path)
+
+    def _load_replay_data(self, filepath):
+        if not HDF5_AVAILABLE:
+            QtWidgets.QMessageBox.warning(self, "Chyba", "h5py není dostupné")
+            return
+        try:
+            with h5py.File(filepath, 'r') as f:
+                # Nový formát: /sky1 a /sky2; starý formát: /sky (jen senzor 1)
+                if 'sky1' in f:
+                    sky1_data = f['sky1']['data'][:]
+                    sky1_time = f['sky1']['time'][:]
+                    sky1_temp = f['sky1']['temp'][:]
+                    sky2_data = f['sky2']['data'][:] if 'sky2' in f else np.full((0, ROWS, COLS), np.nan, dtype=np.float32)
+                    sky2_time = f['sky2']['time'][:] if 'sky2' in f else np.array([], dtype=np.int64)
+                    sky2_temp = f['sky2']['temp'][:] if 'sky2' in f else np.array([], dtype=np.float32)
+                else:
+                    # Starý formát – zpětná kompatibilita
+                    sky1_data = f['sky']['data'][:]
+                    sky1_time = f['sky']['time'][:]
+                    sky1_temp = f['sky']['temp'][:]
+                    sky2_data = np.full((0, ROWS, COLS), np.nan, dtype=np.float32)
+                    sky2_time = np.array([], dtype=np.int64)
+                    sky2_temp = np.array([], dtype=np.float32)
+
+                self.replay_data = {
+                    'sky1_data': sky1_data,
+                    'sky1_time': sky1_time,
+                    'sky1_temp': sky1_temp,
+                    'sky2_data': sky2_data,
+                    'sky2_time': sky2_time,
+                    'sky2_temp': sky2_temp,
+                    'hygro_temp': f['hygro']['temp'][:] if 'hygro' in f else np.array([]),
+                    'hygro_hum':  f['hygro']['hum'][:]  if 'hygro' in f else np.array([]),
+                    'hygro_time': f['hygro']['time'][:] if 'hygro' in f else np.array([]),
+                    'light_all':  f['light']['all'][:]  if 'light' in f else np.array([]),
+                    'light_ir':   f['light']['ir'][:]   if 'light' in f else np.array([]),
+                    'light_gain': f['light']['gain'][:] if 'light' in f else np.array([]),
+                    'light_expo': f['light']['expo'][:] if 'light' in f else np.array([]),
+                    'light_time': f['light']['time'][:] if 'light' in f else np.array([]),
+                }
+
+            n = len(self.replay_data['sky1_data'])
+            n2 = len(self.replay_data['sky2_data'])
+            print(f"Replay: načteno {n} snímků (S1) + {n2} snímků (S2) z {filepath}")
+
+            self.replay_frame_idx = 0
+            self.replay_playing = False
+            self.replay_play_btn.setText("▶")
+            self.replay_start_real = None
+            self.replay_start_data_ns = None
+
+            self.replay_slider.setRange(0, max(0, n - 1))
+            self.replay_frame_label.setText(f"0 / {n}")
+            self.replay_controls.setVisible(True)
+
+            # Disable serial logging in replay mode
+            self.log_action.setEnabled(False)
+
+            if n > 0:
+                self._display_replay_frame(0)
+
+            self.setWindowTitle(f"AMSKY01 Replay — {os.path.basename(filepath)}")
+            self.statusBar().showMessage(f"Replay: {os.path.basename(filepath)}  ({n} snímků)")
+
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Chyba", f"Nelze načíst soubor:\n{e}")
+            self.replay_data = None
+
+    def _on_poll_timer(self):
+        if self.replay_data is not None:
+            self.poll_replay()
+        elif self.ser is not None:
+            self.poll_serial()
+
+    def poll_replay(self):
+        if not self.replay_playing or self.replay_data is None:
+            return
+
+        sky_time = self.replay_data['sky1_time']
+        n = len(sky_time)
+        if n == 0:
+            return
+
+        if self.replay_start_real is None:
+            self.replay_start_real = time.time()
+            self.replay_start_data_ns = sky_time[self.replay_frame_idx]
+
+        elapsed_ns = (time.time() - self.replay_start_real) * self.replay_speed * 1e9
+        target_ts  = self.replay_start_data_ns + elapsed_ns
+        target_idx = int(np.searchsorted(sky_time, target_ts))
+        target_idx = min(target_idx, n - 1)
+
+        if target_idx > self.replay_frame_idx:
+            self.replay_frame_idx = target_idx
+            self._display_replay_frame(self.replay_frame_idx)
+
+        if self.replay_frame_idx >= n - 1:
+            self.replay_playing = False
+            self.replay_play_btn.setText("▶")
+
+    def _display_replay_frame(self, idx):
+        d = self.replay_data
+        sky1_data = d['sky1_data']
+        sky1_time = d['sky1_time']
+        sky2_data = d['sky2_data']
+        sky2_time = d['sky2_time']
+        n = len(sky1_data)
+
+        if idx >= n:
+            return
+
+        frame1 = sky1_data[idx]
+        ts_ns  = sky1_time[idx]
+
+        # Senzor 1
+        self._update_image(1, frame1)
+
+        # Senzor 2 – nejbližší snímek dle timestamp
+        if len(sky2_time) > 0:
+            si2 = min(int(np.searchsorted(sky2_time, ts_ns)), len(sky2_data) - 1)
+            self._update_image(2, sky2_data[si2])
+
+        # Timestamp
+        dt = datetime.fromtimestamp(ts_ns / 1e9, tz=timezone.utc)
+        time_str = dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+        self.replay_time_label.setText(time_str)
+        self.replay_frame_label.setText(f"{idx + 1} / {n}")
+        self.current_data["timestamp"] = dt.isoformat()
+
+        # Slider (bez zpětného volání)
+        self.replay_slider.blockSignals(True)
+        self.replay_slider.setValue(idx)
+        self.replay_slider.blockSignals(False)
+
+        # Hygro (nejbližší vzorek k aktuálnímu timestamp)
+        if len(d['hygro_time']) > 0:
+            hi = int(np.searchsorted(d['hygro_time'], ts_ns))
+            hi = min(hi, len(d['hygro_temp']) - 1)
+            t  = float(d['hygro_temp'][hi])
+            rh = float(d['hygro_hum'][hi])
+            dew = dewpoint_magnus(t, rh)
+            self.lbl_temp.setText(f"{t:.2f}")
+            self.lbl_rh.setText(f"{rh:.2f}")
+            self.lbl_dew.setText(f"{dew:.2f}")
+            self.last_ambient_temp = t
+            self.last_humidity = rh
+            self.current_data["hygro"].update({"temp": t, "rh": rh, "dew_point": dew})
+
+        # Light (pokud dostupné)
+        if len(d['light_time']) > 0:
+            li = int(np.searchsorted(d['light_time'], ts_ns))
+            li = min(li, len(d['light_all']) - 1)
+            full = float(d['light_all'][li])
+            ir   = float(d['light_ir'][li])
+            gain = float(d['light_gain'][li])
+            expo = float(d['light_expo'][li])
+            self.lbl_full.setText(f"{full:.0f}")
+            self.lbl_ir.setText(f"{ir:.0f}")
+            self.lbl_gain.setText(f"{gain:.0f}x")
+            self.lbl_itime.setText(f"{expo:.0f}ms")
+            sqm_val = calculate_sqm(int(full), int(ir), expo, gain, self.sqm_zp)
+            self.lbl_sqm.setText(f"{sqm_val:.2f}" if sqm_val != float('inf') else "∞")
+
+        # MLX Ta z uložené teploty čipu
+        chip_ta1 = float(d['sky1_temp'][idx])
+        self.lbl_ta1.setText(f"{chip_ta1:.3f}")
+        self.last_ta1 = chip_ta1
+        if len(d['sky2_time']) > 0:
+            si2 = min(int(np.searchsorted(d['sky2_time'], ts_ns)), len(d['sky2_temp']) - 1)
+            chip_ta2 = float(d['sky2_temp'][si2])
+            self.lbl_ta2.setText(f"{chip_ta2:.3f}")
+            self.last_ta2 = chip_ta2
+
+        self.update_data_table()
+
+    def _toggle_replay_play(self):
+        if self.replay_data is None:
+            return
+        if self.replay_playing:
+            self.replay_playing = False
+            self.replay_play_btn.setText("▶")
+        else:
+            n = len(self.replay_data['sky1_time'])
+            if self.replay_frame_idx >= n - 1:
+                self.replay_frame_idx = 0
+            self.replay_playing = True
+            self.replay_play_btn.setText("⏸")
+            self.replay_start_real = None
+            self.replay_start_data_ns = None
+
+    def _replay_rewind(self):
+        self.replay_playing = False
+        self.replay_play_btn.setText("▶")
+        self.replay_start_real = None
+        self.replay_start_data_ns = None
+        self.replay_frame_idx = 0
+        if self.replay_data and len(self.replay_data['sky_data']) > 0:
+            self._display_replay_frame(0)
+
+    def _seek_replay(self, value):
+        self.replay_frame_idx = value
+        self.replay_start_real = None
+        self.replay_start_data_ns = None
+        if self.replay_data:
+            self._display_replay_frame(value)
+
+    def _set_replay_speed(self, speed_str):
+        speeds = {"0.5x": 0.5, "1x": 1.0, "2x": 2.0, "5x": 5.0, "10x": 10.0, "20x": 20.0}
+        self.replay_speed = speeds.get(speed_str, 1.0)
+        if self.replay_playing:
+            self.replay_start_real = None
+            self.replay_start_data_ns = None
+
     def closeEvent(self, event):
         """Při zavírání okna zavři i HDF5 soubor a HTTP server."""
         if self.logger is not None:
@@ -1417,52 +1725,60 @@ class MainWindow(QtWidgets.QMainWindow):
 
 def main():
     parser = argparse.ArgumentParser(description="Melexis AMSKY01 vizualizátor (PyQtGraph)")
-    parser.add_argument("--port", required=True, help="seriový port, např. /dev/ttyACM0")
+    parser.add_argument("--port", default=None, help="seriový port, např. /dev/ttyACM0")
     parser.add_argument("--baud", type=int, default=115200, help="baudrate (default 115200)")
+    parser.add_argument("--replay", type=str, default=None, metavar="FILE",
+                        help="HDF5 log soubor pro přehrávání (alternativa k --port)")
+    parser.add_argument("--replay-speed", type=float, default=1.0,
+                        help="rychlost přehrávání, např. 2.0 = 2× (default 1.0)")
     parser.add_argument("--vmin", type=float, default=None, help="min. teplota pro barevnou škálu")
     parser.add_argument("--vmax", type=float, default=None, help="max. teplota pro barevnou škálu")
-    parser.add_argument("--rotation", type=float, default=0.0, help="rotace obrazu ve stupních (kladně proti směru hodinových ručiček)")
+    parser.add_argument("--rotation", type=float, default=0.0, help="rotace obrazu ve stupních")
     parser.add_argument("--debug", action="store_true", help="zobraz všechny zprávy na seriové lince")
     parser.add_argument("--log", action="store_true", help="zapni HDF5 logování při startu")
     parser.add_argument("--api", action="store_true", help="zapni HTTP API při startu")
-    parser.add_argument("--log-name", type=str, default=None, help="ID zařízení pro názvy HDF5 souborů (default: z konfigurace)")
-    parser.add_argument("--log-path", type=str, default=None, help="cesta pro ukládání HDF5 souborů (default: z konfigurace)")
+    parser.add_argument("--log-name", type=str, default=None, help="ID zařízení pro názvy HDF5 souborů")
+    parser.add_argument("--log-path", type=str, default=None, help="cesta pro ukládání HDF5 souborů")
     parser.add_argument("--sqm-zp", type=float, default=24.0, help="SQM kalibrační konstanta (výchozí: 24.0)")
 
     args = parser.parse_args()
 
-    try:
-        ser = serial.Serial(args.port, args.baud, timeout=0)
-    except serial.SerialException as e:
-        print(f"Nelze otevřít port {args.port}: {e}")
-        sys.exit(1)
+    if args.port is None and args.replay is None:
+        # Spuštění bez argumentů – dialog pro výběr souboru se otevře po startu
+        print("Tip: zadejte --port nebo --replay, nebo použijte File > Open Replay File...")
 
-    # Po startu automaticky zapni režim streamování heatmapy
-    try:
-        cmd = b"thrmap_on\n"
-        ser.write(cmd)
-        if args.debug:
-            print(f"> {cmd.decode().rstrip()}")
-    except serial.SerialException:
-        pass
+    ser = None
+    if args.port:
+        try:
+            ser = serial.Serial(args.port, args.baud, timeout=0)
+        except serial.SerialException as e:
+            print(f"Nelze otevřít port {args.port}: {e}")
+            sys.exit(1)
+        try:
+            ser.write(b"thrmap_on\n")
+            if args.debug:
+                print("> thrmap_on")
+        except serial.SerialException:
+            pass
 
     app = QtWidgets.QApplication(sys.argv)
     
-    # Nastavení dark mode
+    # Nastavení dark mode (PySide6 >= 6.4 vyžaduje ColorRole.*)
+    _cr = QtGui.QPalette.ColorRole
     palette = QtGui.QPalette()
-    palette.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
-    palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(255, 255, 255))
-    palette.setColor(QtGui.QPalette.Base, QtGui.QColor(35, 35, 35))
-    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
-    palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(25, 25, 25))
-    palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(255, 255, 255))
-    palette.setColor(QtGui.QPalette.Text, QtGui.QColor(255, 255, 255))
-    palette.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
-    palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(255, 255, 255))
-    palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 0, 0))
-    palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
-    palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
-    palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(35, 35, 35))
+    palette.setColor(_cr.Window,          QtGui.QColor(53, 53, 53))
+    palette.setColor(_cr.WindowText,      QtGui.QColor(255, 255, 255))
+    palette.setColor(_cr.Base,            QtGui.QColor(35, 35, 35))
+    palette.setColor(_cr.AlternateBase,   QtGui.QColor(53, 53, 53))
+    palette.setColor(_cr.ToolTipBase,     QtGui.QColor(25, 25, 25))
+    palette.setColor(_cr.ToolTipText,     QtGui.QColor(255, 255, 255))
+    palette.setColor(_cr.Text,            QtGui.QColor(255, 255, 255))
+    palette.setColor(_cr.Button,          QtGui.QColor(53, 53, 53))
+    palette.setColor(_cr.ButtonText,      QtGui.QColor(255, 255, 255))
+    palette.setColor(_cr.BrightText,      QtGui.QColor(255, 0, 0))
+    palette.setColor(_cr.Link,            QtGui.QColor(42, 130, 218))
+    palette.setColor(_cr.Highlight,       QtGui.QColor(42, 130, 218))
+    palette.setColor(_cr.HighlightedText, QtGui.QColor(35, 35, 35))
     app.setPalette(palette)
     
     # Nastavení stylu widgetů
@@ -1494,23 +1810,30 @@ def main():
     app.setApplicationName("AMSKY01Viewer")
     
     win = MainWindow(
-        ser, 
-        vmin=args.vmin, 
-        vmax=args.vmax, 
-        rotation=args.rotation, 
+        ser,
+        vmin=args.vmin,
+        vmax=args.vmax,
+        rotation=args.rotation,
         debug=args.debug,
         enable_logging=args.log,
         enable_http_api=args.api,
         device_id=args.log_name,
         log_path=args.log_path,
-        sqm_zp=args.sqm_zp
+        sqm_zp=args.sqm_zp,
+        replay_file=args.replay,
+        replay_speed=args.replay_speed,
     )
-    win.resize(1000, 600)
+    win.resize(1100, 650)
     win.show()
+
+    # Pokud není zadán port ani replay soubor, otevři dialog pro výběr souboru
+    if args.port is None and args.replay is None and HDF5_AVAILABLE:
+        QtCore.QTimer.singleShot(200, win._open_replay_file_dialog)
 
     ret = app.exec()
 
-    ser.close()
+    if ser is not None:
+        ser.close()
     sys.exit(ret)
 
 
