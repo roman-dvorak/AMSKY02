@@ -15,6 +15,7 @@ Spuštění (příklad):
     python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
     python amsky01_viewer.py --replay AMSKY01_20260502_18.h5
     python amsky01_viewer.py --replay AMSKY01_20260502_18.h5 --replay-speed 5
+    python amsky01_viewer.py --port /dev/ttyACM0 --headless --log --verbose
 """
 
 import argparse
@@ -458,6 +459,11 @@ class HDF5Logger:
         self.light_gain = None
         self.light_expo = None
         self.light_time = None
+
+        # /cloud{1,2}/ — rohy + střed + Vdd
+        for sid in (1, 2):
+            for name in ("tl", "tr", "bl", "br", "center", "vdd", "time"):
+                setattr(self, f"cloud{sid}_{name}", None)
     
     def _get_current_hour(self):
         """Vrací aktuální hodinu jako datetime objekt (UTC)."""
@@ -565,7 +571,26 @@ class HDF5Logger:
             self.light_gain = light_grp["gain"]
             self.light_expo = light_grp["expo"]
             self.light_time = light_grp["time"]
-    
+
+        # Skupiny /cloud1 a /cloud2 — rohy, střed a Vdd
+        for sid in (1, 2):
+            gname = f"cloud{sid}"
+            if gname not in f:
+                grp = f.create_group(gname)
+                for name in ("tl", "tr", "bl", "br", "center", "vdd"):
+                    setattr(self, f"cloud{sid}_{name}", grp.create_dataset(
+                        name, shape=(0,), maxshape=(None,),
+                        dtype=np.float32, chunks=(1024,)
+                    ))
+                setattr(self, f"cloud{sid}_time", grp.create_dataset(
+                    "time", shape=(0,), maxshape=(None,),
+                    dtype=np.int64, chunks=(1024,)
+                ))
+            else:
+                grp = f[gname]
+                for name in ("tl", "tr", "bl", "br", "center", "vdd", "time"):
+                    setattr(self, f"cloud{sid}_{name}", grp[name])
+
     def _get_timestamp_ns(self) -> int:
         """Vrací aktuální Unix timestamp v nanosekundách."""
         return int(time.time() * 1e9)
@@ -628,6 +653,27 @@ class HDF5Logger:
         
         self.current_file.flush()
     
+    def log_cloud(self, sensor_id: int, tl: float, tr: float, bl: float,
+                  br: float, center: float, vdd: float = float('nan')):
+        """Zaloguje rohy/střed/Vdd pro daný senzor (1 nebo 2) do /cloud{N}."""
+        self._ensure_file()
+
+        timestamp = self._get_timestamp_ns()
+        values = {"tl": tl, "tr": tr, "bl": bl, "br": br,
+                  "center": center, "vdd": vdd}
+
+        time_ds = getattr(self, f"cloud{sensor_id}_time")
+        n = time_ds.shape[0]
+        time_ds.resize((n + 1,))
+        time_ds[n] = timestamp
+
+        for name, value in values.items():
+            ds = getattr(self, f"cloud{sensor_id}_{name}")
+            ds.resize((n + 1,))
+            ds[n] = value
+
+        self.current_file.flush()
+
     def close(self):
         """Zavře aktuální HDF5 soubor."""
         if self.current_file is not None:
@@ -659,6 +705,167 @@ class DataHTTPHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         # Potlač log zprávy
         pass
+
+
+class HeadlessRunner:
+    """Headless (no-GUI) běh nad seriovou linkou.
+
+    Parsuje příchozí $thrmap / $hygro / $light / $cloud_meta / $cloud, loguje
+    do HDF5 (pokud zapnuto) a volitelně vypisuje hodnoty na stdout.
+    """
+
+    def __init__(self, ser, device_id="AMSKY01", log_path=".",
+                 enable_logging=True, verbose=False, sqm_zp=24.0,
+                 stats_interval=10.0):
+        self.ser = ser
+        self.verbose = verbose
+        self.sqm_zp = sqm_zp
+        self.stats_interval = stats_interval
+
+        self.line_buffer = ""
+        self.logger = None
+        if enable_logging:
+            if not HDF5_AVAILABLE:
+                print("VAROVÁNÍ: h5py není dostupné, logování vypnuto", file=sys.stderr)
+            else:
+                self.logger = HDF5Logger(device_id, Path(log_path or "."))
+                print(f"HDF5 logování aktivní: {device_id} -> {log_path or '.'}")
+
+        # Poslední známé hodnoty pro logování
+        self.last_ta = {1: None, 2: None}
+        self.last_vdd = {1: float('nan'), 2: float('nan')}
+
+        # Počítadla pro periodický status
+        self.counters = {"thrmap1": 0, "thrmap2": 0, "hygro": 0,
+                         "light": 0, "cloud1": 0, "cloud2": 0,
+                         "cloud_meta1": 0, "cloud_meta2": 0}
+        self._stats_last = time.time()
+        self._running = True
+
+    def _vlog(self, msg: str):
+        if self.verbose:
+            ts = datetime.now().strftime("%H:%M:%S")
+            print(f"[{ts}] {msg}", flush=True)
+
+    def _print_stats(self):
+        now = time.time()
+        if now - self._stats_last < self.stats_interval:
+            return
+        dt = now - self._stats_last
+        parts = [f"{k}={v}" for k, v in self.counters.items() if v > 0]
+        log_state = ""
+        if self.logger and self.logger.current_file:
+            log_state = f" log={self.logger._get_filename(self.logger.current_hour)}"
+        print(f"[stats {dt:.1f}s] " + ", ".join(parts) + log_state, flush=True)
+        for k in self.counters:
+            self.counters[k] = 0
+        self._stats_last = now
+
+    def process_line(self, line: str):
+        s = line.strip()
+        if not s:
+            return
+
+        if s.startswith("$thrmap,"):
+            result = parse_thrmap(s)
+            if result is None:
+                return
+            sensor_id, frame = result
+            self.counters[f"thrmap{sensor_id}"] += 1
+            self._vlog(f"thrmap S{sensor_id}: min={frame.min():.2f} "
+                       f"max={frame.max():.2f} mean={frame.mean():.2f} °C")
+            if self.logger and self.last_ta[sensor_id] is not None:
+                self.logger.log_sky(sensor_id, frame, self.last_ta[sensor_id])
+            return
+
+        if s.startswith("$hygro,"):
+            v = parse_hygro(s)
+            if v is None:
+                return
+            t, rh, dew = v
+            self.counters["hygro"] += 1
+            self._vlog(f"hygro: T={t:.2f}°C RH={rh:.2f}% dew={dew:.2f}°C")
+            if self.logger:
+                self.logger.log_hygro(t, rh)
+            return
+
+        if s.startswith("$light,"):
+            v = parse_light(s)
+            if v is None:
+                return
+            lux, full_raw, ir_raw, gain, itime, sqm_fw = v
+            self.counters["light"] += 1
+            try:
+                gain_val = gain_str_to_float(gain)
+                itime_val = float(str(itime).rstrip('ms'))
+                sqm_calc = calculate_sqm(int(full_raw), int(ir_raw),
+                                         itime_val, gain_val, self.sqm_zp)
+                sqm_str = f"{sqm_calc:.2f}" if sqm_calc != float('inf') else "inf"
+            except Exception:
+                gain_val, itime_val, sqm_str = 1.0, 100.0, "n/a"
+            self._vlog(f"light: full={full_raw:.0f} ir={ir_raw:.0f} "
+                       f"gain={gain} int={itime} lux={lux:.4f} sqm={sqm_str}")
+            if self.logger:
+                try:
+                    self.logger.log_light(full_raw, ir_raw, gain_val, itime_val)
+                except Exception as e:
+                    print(f"chyba logování light: {e}", file=sys.stderr)
+            return
+
+        if s.startswith("$cloud_meta,"):
+            v = parse_cloud_meta(s)
+            if v is None:
+                return
+            sensor_id, vdd, ta = v
+            self.counters[f"cloud_meta{sensor_id}"] += 1
+            self.last_ta[sensor_id] = ta
+            self.last_vdd[sensor_id] = vdd
+            self._vlog(f"cloud_meta S{sensor_id}: Vdd={vdd:.3f} V Ta={ta:.3f} °C")
+            return
+
+        if s.startswith("$cloud,"):
+            v = parse_cloud(s)
+            if v is None:
+                return
+            sensor_id, tl, tr, bl, br, ctr = v
+            self.counters[f"cloud{sensor_id}"] += 1
+            self._vlog(f"cloud S{sensor_id}: TL={tl:.2f} TR={tr:.2f} "
+                       f"BL={bl:.2f} BR={br:.2f} C={ctr:.2f} °C")
+            if self.logger:
+                self.logger.log_cloud(sensor_id, tl, tr, bl, br, ctr,
+                                      self.last_vdd[sensor_id])
+            return
+
+    def run(self):
+        """Hlavní smyčka — čte ze seriové linky a zpracovává řádky."""
+        if self.ser is None:
+            print("Chyba: headless režim vyžaduje --port", file=sys.stderr)
+            return 1
+
+        print(f"Headless mode: čtu z {self.ser.port} @ {self.ser.baudrate} Bd",
+              flush=True)
+        try:
+            while self._running:
+                try:
+                    waiting = self.ser.in_waiting
+                    if waiting:
+                        chunk = self.ser.read(waiting).decode(errors="ignore")
+                        self.line_buffer += chunk
+                        while "\n" in self.line_buffer:
+                            line, self.line_buffer = self.line_buffer.split("\n", 1)
+                            self.process_line(line)
+                    else:
+                        time.sleep(0.02)
+                except serial.SerialException as e:
+                    print(f"Serial error: {e}", file=sys.stderr)
+                    return 2
+                self._print_stats()
+        except KeyboardInterrupt:
+            print("\nUkončeno uživatelem (Ctrl+C)")
+        finally:
+            if self.logger:
+                self.logger.close()
+        return 0
 
 
 class ConfigDialog(QtWidgets.QDialog):
@@ -753,6 +960,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Pro logování sky dat potřebujeme poslední známou Ta
         self.last_ta1 = None
         self.last_ta2 = None
+        # Poslední známá Vdd z $cloud_meta — připojí se k $cloud zápisu
+        self.last_vdd1 = float('nan')
+        self.last_vdd2 = float('nan')
         
         # Režim zobrazení (raw vs calibrated)
         self.show_calibrated = False
@@ -1380,12 +1590,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.lbl_vdd1.setText(f"{vdd:.3f}")
                     self.lbl_ta1.setText(f"{ta:.3f}")
                     self.last_ta1 = ta
+                    self.last_vdd1 = vdd
                     self.current_data["mlx1"]["vdd"] = vdd
                     self.current_data["mlx1"]["ta"] = ta
                 elif sensor_id == 2:
                     self.lbl_vdd2.setText(f"{vdd:.3f}")
                     self.lbl_ta2.setText(f"{ta:.3f}")
                     self.last_ta2 = ta
+                    self.last_vdd2 = vdd
                     self.current_data["mlx2"]["vdd"] = vdd
                     self.current_data["mlx2"]["ta"] = ta
                 
@@ -1408,6 +1620,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.current_data["cloud1"]["bl"] = bl
                     self.current_data["cloud1"]["br"] = br
                     self.current_data["cloud1"]["center"] = ctr
+                    if self.logging_enabled and self.logger:
+                        self.logger.log_cloud(1, tl, tr, bl, br, ctr, self.last_vdd1)
                 elif sensor_id == 2:
                     self.lbl_tl2.setText(f"{tl:.2f}")
                     self.lbl_tr2.setText(f"{tr:.2f}")
@@ -1419,7 +1633,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.current_data["cloud2"]["bl"] = bl
                     self.current_data["cloud2"]["br"] = br
                     self.current_data["cloud2"]["center"] = ctr
-                
+                    if self.logging_enabled and self.logger:
+                        self.logger.log_cloud(2, tl, tr, bl, br, ctr, self.last_vdd2)
+
                 self.update_data_table()
             return
 
@@ -1740,8 +1956,48 @@ def main():
     parser.add_argument("--log-name", type=str, default=None, help="ID zařízení pro názvy HDF5 souborů")
     parser.add_argument("--log-path", type=str, default=None, help="cesta pro ukládání HDF5 souborů")
     parser.add_argument("--sqm-zp", type=float, default=24.0, help="SQM kalibrační konstanta (výchozí: 24.0)")
+    parser.add_argument("--headless", "--no-gui", dest="headless", action="store_true",
+                        help="běh bez GUI — pouze parsování a logování ze seriové linky")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="vypisuj přijímané hodnoty na stdout")
+    parser.add_argument("--stats-interval", type=float, default=10.0,
+                        help="interval [s] pro souhrnný status v headless režimu (default 10)")
 
     args = parser.parse_args()
+
+    if args.headless:
+        if args.port is None:
+            print("Chyba: --headless vyžaduje --port", file=sys.stderr)
+            sys.exit(2)
+        try:
+            ser = serial.Serial(args.port, args.baud, timeout=0)
+        except serial.SerialException as e:
+            print(f"Nelze otevřít port {args.port}: {e}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            ser.write(b"thrmap_on\n")
+            if args.verbose:
+                print("> thrmap_on")
+        except serial.SerialException:
+            pass
+
+        device_id = args.log_name or "AMSKY01"
+        log_path = args.log_path or "."
+        runner = HeadlessRunner(
+            ser,
+            device_id=device_id,
+            log_path=log_path,
+            enable_logging=args.log,
+            verbose=args.verbose,
+            sqm_zp=args.sqm_zp,
+            stats_interval=args.stats_interval,
+        )
+        rc = runner.run()
+        try:
+            ser.close()
+        except Exception:
+            pass
+        sys.exit(rc)
 
     if args.port is None and args.replay is None:
         # Spuštění bez argumentů – dialog pro výběr souboru se otevře po startu
