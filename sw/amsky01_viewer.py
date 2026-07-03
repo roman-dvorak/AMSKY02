@@ -460,11 +460,10 @@ class HDF5Logger:
         self.hygro_hum = None
         self.hygro_time = None
 
-        self.light_all = None
-        self.light_ir = None
-        self.light_gain = None
-        self.light_expo = None
-        self.light_time = None
+        # /light0 a /light1 — TSL2591 na obou kanálech I2C muxu, odděleně
+        for ch in (0, 1):
+            for name in ("all", "ir", "gain", "expo", "time"):
+                setattr(self, f"light{ch}_{name}", None)
 
         # /cloud{1,2}/ — rohy + střed + Vdd
         for sid in (1, 2):
@@ -547,36 +546,38 @@ class HDF5Logger:
             self.hygro_hum = hygro_grp["hum"]
             self.hygro_time = hygro_grp["time"]
         
-        # Skupina /light
-        if "light" not in f:
-            light_grp = f.create_group("light")
-            self.light_all = light_grp.create_dataset(
-                "all", shape=(0,), maxshape=(None,),
-                dtype=np.float32, chunks=(1024,)
-            )
-            self.light_ir = light_grp.create_dataset(
-                "ir", shape=(0,), maxshape=(None,),
-                dtype=np.float32, chunks=(1024,)
-            )
-            self.light_gain = light_grp.create_dataset(
-                "gain", shape=(0,), maxshape=(None,),
-                dtype=np.float32, chunks=(1024,)
-            )
-            self.light_expo = light_grp.create_dataset(
-                "expo", shape=(0,), maxshape=(None,),
-                dtype=np.float32, chunks=(1024,)
-            )
-            self.light_time = light_grp.create_dataset(
-                "time", shape=(0,), maxshape=(None,),
-                dtype=np.int64, chunks=(1024,)
-            )
-        else:
-            light_grp = f["light"]
-            self.light_all = light_grp["all"]
-            self.light_ir = light_grp["ir"]
-            self.light_gain = light_grp["gain"]
-            self.light_expo = light_grp["expo"]
-            self.light_time = light_grp["time"]
+        # Skupiny /light0 a /light1 — TSL2591 na obou kanálech I2C muxu
+        for ch in (0, 1):
+            gname = f"light{ch}"
+            if gname not in f:
+                light_grp = f.create_group(gname)
+                setattr(self, f"light{ch}_all", light_grp.create_dataset(
+                    "all", shape=(0,), maxshape=(None,),
+                    dtype=np.float32, chunks=(1024,)
+                ))
+                setattr(self, f"light{ch}_ir", light_grp.create_dataset(
+                    "ir", shape=(0,), maxshape=(None,),
+                    dtype=np.float32, chunks=(1024,)
+                ))
+                setattr(self, f"light{ch}_gain", light_grp.create_dataset(
+                    "gain", shape=(0,), maxshape=(None,),
+                    dtype=np.float32, chunks=(1024,)
+                ))
+                setattr(self, f"light{ch}_expo", light_grp.create_dataset(
+                    "expo", shape=(0,), maxshape=(None,),
+                    dtype=np.float32, chunks=(1024,)
+                ))
+                setattr(self, f"light{ch}_time", light_grp.create_dataset(
+                    "time", shape=(0,), maxshape=(None,),
+                    dtype=np.int64, chunks=(1024,)
+                ))
+            else:
+                light_grp = f[gname]
+                setattr(self, f"light{ch}_all", light_grp["all"])
+                setattr(self, f"light{ch}_ir", light_grp["ir"])
+                setattr(self, f"light{ch}_gain", light_grp["gain"])
+                setattr(self, f"light{ch}_expo", light_grp["expo"])
+                setattr(self, f"light{ch}_time", light_grp["time"])
 
         # Skupiny /cloud1 a /cloud2 — rohy, střed a Vdd
         for sid in (1, 2):
@@ -638,25 +639,31 @@ class HDF5Logger:
         
         self.current_file.flush()
     
-    def log_light(self, full: float, ir: float, gain: float, expo: float):
-        """Zaloguje data z TSL2591 do /light."""
+    def log_light(self, channel: int, full: float, ir: float, gain: float, expo: float):
+        """Zaloguje data z TSL2591 daného kanálu muxu (0/1) do /light{channel}."""
         self._ensure_file()
-        
+
         timestamp = self._get_timestamp_ns()
-        
-        n = self.light_all.shape[0]
-        self.light_all.resize((n + 1,))
-        self.light_ir.resize((n + 1,))
-        self.light_gain.resize((n + 1,))
-        self.light_expo.resize((n + 1,))
-        self.light_time.resize((n + 1,))
-        
-        self.light_all[n] = full
-        self.light_ir[n] = ir
-        self.light_gain[n] = gain
-        self.light_expo[n] = expo
-        self.light_time[n] = timestamp
-        
+
+        all_ds = getattr(self, f"light{channel}_all")
+        ir_ds = getattr(self, f"light{channel}_ir")
+        gain_ds = getattr(self, f"light{channel}_gain")
+        expo_ds = getattr(self, f"light{channel}_expo")
+        time_ds = getattr(self, f"light{channel}_time")
+
+        n = all_ds.shape[0]
+        all_ds.resize((n + 1,))
+        ir_ds.resize((n + 1,))
+        gain_ds.resize((n + 1,))
+        expo_ds.resize((n + 1,))
+        time_ds.resize((n + 1,))
+
+        all_ds[n] = full
+        ir_ds[n] = ir
+        gain_ds[n] = gain
+        expo_ds[n] = expo
+        time_ds[n] = timestamp
+
         self.current_file.flush()
     
     def log_cloud(self, sensor_id: int, tl: float, tr: float, bl: float,
@@ -743,7 +750,7 @@ class HeadlessRunner:
 
         # Počítadla pro periodický status
         self.counters = {"thrmap1": 0, "thrmap2": 0, "hygro": 0,
-                         "light": 0, "cloud1": 0, "cloud2": 0,
+                         "light0": 0, "light1": 0, "cloud1": 0, "cloud2": 0,
                          "cloud_meta1": 0, "cloud_meta2": 0}
         self._stats_last = time.time()
         self._running = True
@@ -800,7 +807,7 @@ class HeadlessRunner:
             if v is None:
                 return
             channel, lux, full_raw, ir_raw, gain, itime, sqm_fw = v
-            self.counters["light"] += 1
+            self.counters[f"light{channel}"] += 1
             try:
                 gain_val = gain_str_to_float(gain)
                 itime_val = float(str(itime).rstrip('ms'))
@@ -813,9 +820,7 @@ class HeadlessRunner:
                        f"gain={gain} int={itime} lux={lux:.4f} sqm={sqm_str}")
             if self.logger:
                 try:
-                    # Pozn.: log_light zatím nerozlišuje kanál muxu, oba
-                    # TSL2591 se logují do stejné datové sady.
-                    self.logger.log_light(full_raw, ir_raw, gain_val, itime_val)
+                    self.logger.log_light(channel, full_raw, ir_raw, gain_val, itime_val)
                 except Exception as e:
                     print(f"chyba logování light: {e}", file=sys.stderr)
             return
@@ -983,7 +988,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_data = {
             "timestamp": None,
             "hygro": {"temp": None, "rh": None, "dew_point": None},
-            "light": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
+            "light0": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
+            "light1": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
             "mlx1": {"vdd": None, "ta": None},
             "mlx2": {"vdd": None, "ta": None},
             "cloud1": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
@@ -1145,19 +1151,33 @@ class MainWindow(QtWidgets.QMainWindow):
         form.addRow("SHT4x RH [%]", self.lbl_rh)
         form.addRow("Dew Point [°C]", self.lbl_dew)
 
-        # Light
-        self.lbl_lux = make_label()
-        self.lbl_full = make_label()
-        self.lbl_ir = make_label()
-        self.lbl_gain = make_label()
-        self.lbl_itime = make_label()
-        self.lbl_sqm = make_label()
-        form.addRow("Lux", self.lbl_lux)
-        form.addRow("TSL full", self.lbl_full)
-        form.addRow("TSL IR", self.lbl_ir)
-        form.addRow("TSL gain", self.lbl_gain)
-        form.addRow("TSL int", self.lbl_itime)
-        form.addRow("SQM [mag/arcsec²]", self.lbl_sqm)
+        # Light - kanál 0 (mux)
+        self.lbl_lux0 = make_label()
+        self.lbl_full0 = make_label()
+        self.lbl_ir0 = make_label()
+        self.lbl_gain0 = make_label()
+        self.lbl_itime0 = make_label()
+        self.lbl_sqm0 = make_label()
+        form.addRow("LIGHT0 Lux", self.lbl_lux0)
+        form.addRow("LIGHT0 Full", self.lbl_full0)
+        form.addRow("LIGHT0 IR", self.lbl_ir0)
+        form.addRow("LIGHT0 Gain", self.lbl_gain0)
+        form.addRow("LIGHT0 Int", self.lbl_itime0)
+        form.addRow("SQM0 [mag/arcsec²]", self.lbl_sqm0)
+
+        # Light - kanál 1 (mux)
+        self.lbl_lux1 = make_label()
+        self.lbl_full1 = make_label()
+        self.lbl_ir1 = make_label()
+        self.lbl_gain1 = make_label()
+        self.lbl_itime1 = make_label()
+        self.lbl_sqm1 = make_label()
+        form.addRow("LIGHT1 Lux", self.lbl_lux1)
+        form.addRow("LIGHT1 Full", self.lbl_full1)
+        form.addRow("LIGHT1 IR", self.lbl_ir1)
+        form.addRow("LIGHT1 Gain", self.lbl_gain1)
+        form.addRow("LIGHT1 Int", self.lbl_itime1)
+        form.addRow("SQM1 [mag/arcsec²]", self.lbl_sqm1)
 
         # IR senzor 1 parametry
         self.lbl_vdd1 = make_label()
@@ -1288,12 +1308,18 @@ class MainWindow(QtWidgets.QMainWindow):
             "SHT4x Temp [°C]",
             "SHT4x RH [%]",
             "Dew Point [°C]",
-            "Lux",
-            "TSL Full",
-            "TSL IR",
-            "TSL Gain",
-            "TSL Integration",
-            "SQM [mag/arcsec²]",
+            "LIGHT0 Lux",
+            "LIGHT0 Full",
+            "LIGHT0 IR",
+            "LIGHT0 Gain",
+            "LIGHT0 Integration",
+            "SQM0 [mag/arcsec²]",
+            "LIGHT1 Lux",
+            "LIGHT1 Full",
+            "LIGHT1 IR",
+            "LIGHT1 Gain",
+            "LIGHT1 Integration",
+            "SQM1 [mag/arcsec²]",
             "MLX Vdd [V]",
             "MLX Ta [°C]",
             "Corner TL [°C]",
@@ -1445,18 +1471,24 @@ class MainWindow(QtWidgets.QMainWindow):
         """Aktualizuje tabulku dat."""
         if self.tabs.currentIndex() == 1:  # Data table tab
             d = self.current_data
-            # Zobrazuje data z prvního senzoru pro kompatibilitu s tabulkou
+            # MLX/cloud sloupce zobrazují data z prvního senzoru pro kompatibilitu s tabulkou
             values = [
                 d["timestamp"] or "—",
                 f"{d['hygro']['temp']:.2f}" if d['hygro']['temp'] is not None else "—",
                 f"{d['hygro']['rh']:.2f}" if d['hygro']['rh'] is not None else "—",
                 f"{d['hygro']['dew_point']:.2f}" if d['hygro']['dew_point'] is not None else "—",
-                f"{d['light']['lux']:.6f}" if d['light']['lux'] is not None else "—",
-                f"{d['light']['full']:.0f}" if d['light']['full'] is not None else "—",
-                f"{d['light']['ir']:.0f}" if d['light']['ir'] is not None else "—",
-                d['light']['gain'] or "—",
-                d['light']['itime'] or "—",
-                f"{d['light']['sqm']:.2f}" if d['light']['sqm'] is not None else "—",
+                f"{d['light0']['lux']:.6f}" if d['light0']['lux'] is not None else "—",
+                f"{d['light0']['full']:.0f}" if d['light0']['full'] is not None else "—",
+                f"{d['light0']['ir']:.0f}" if d['light0']['ir'] is not None else "—",
+                d['light0']['gain'] or "—",
+                d['light0']['itime'] or "—",
+                f"{d['light0']['sqm']:.2f}" if d['light0']['sqm'] is not None else "—",
+                f"{d['light1']['lux']:.6f}" if d['light1']['lux'] is not None else "—",
+                f"{d['light1']['full']:.0f}" if d['light1']['full'] is not None else "—",
+                f"{d['light1']['ir']:.0f}" if d['light1']['ir'] is not None else "—",
+                d['light1']['gain'] or "—",
+                d['light1']['itime'] or "—",
+                f"{d['light1']['sqm']:.2f}" if d['light1']['sqm'] is not None else "—",
                 f"{d['mlx1']['vdd']:.3f}" if d['mlx1']['vdd'] is not None else "—",
                 f"{d['mlx1']['ta']:.3f}" if d['mlx1']['ta'] is not None else "—",
                 f"{d['cloud1']['tl']:.2f}" if d['cloud1']['tl'] is not None else "—",
@@ -1543,51 +1575,58 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.startswith("$light,"):
             v = parse_light(s)
             if v is not None:
-                # Pozn.: GUI zatím zobrazuje jen poslední přijatý kanál
-                # (0 nebo 1); oba TSL2591 posílají $light v pravidelném cyklu.
+                # LIGHT0 a LIGHT1 = TSL2591 na kanálu 0/1 I2C muxu, každý
+                # měří jiný výřez oblohy - zobrazují a logují se odděleně.
                 channel, lux, full_raw, ir_raw, gain, itime, sqm = v
-                self.lbl_full.setText(f"{full_raw:.0f}")
-                self.lbl_ir.setText(f"{ir_raw:.0f}")
-                self.lbl_gain.setText(gain)
-                self.lbl_itime.setText(itime)
-                self.lbl_sqm.setText(f"{sqm:.2f}")
-                
+                lbl_full = self.lbl_full0 if channel == 0 else self.lbl_full1
+                lbl_ir = self.lbl_ir0 if channel == 0 else self.lbl_ir1
+                lbl_gain = self.lbl_gain0 if channel == 0 else self.lbl_gain1
+                lbl_itime = self.lbl_itime0 if channel == 0 else self.lbl_itime1
+                lbl_sqm = self.lbl_sqm0 if channel == 0 else self.lbl_sqm1
+                lbl_lux = self.lbl_lux0 if channel == 0 else self.lbl_lux1
+                data_key = f"light{channel}"
+
+                lbl_full.setText(f"{full_raw:.0f}")
+                lbl_ir.setText(f"{ir_raw:.0f}")
+                lbl_gain.setText(gain)
+                lbl_itime.setText(itime)
+
                 # Vypočítej lux z raw dat pomocí TSL2591 algoritmu
                 tsl_lux_calc = calculate_tsl2591_lux(int(full_raw), int(ir_raw), gain, itime)
                 if tsl_lux_calc >= 0:
-                    self.lbl_lux.setText(f"{tsl_lux_calc:.2f}")
-                    self.current_data["light"]["lux"] = tsl_lux_calc
+                    lbl_lux.setText(f"{tsl_lux_calc:.2f}")
+                    self.current_data[data_key]["lux"] = tsl_lux_calc
                 else:
-                    self.lbl_lux.setText("OVERFLOW")
-                    self.current_data["light"]["lux"] = None
-                
-                self.current_data["light"]["full"] = full_raw
-                self.current_data["light"]["ir"] = ir_raw
-                self.current_data["light"]["gain"] = gain
-                self.current_data["light"]["itime"] = itime
+                    lbl_lux.setText("OVERFLOW")
+                    self.current_data[data_key]["lux"] = None
+
+                self.current_data[data_key]["full"] = full_raw
+                self.current_data[data_key]["ir"] = ir_raw
+                self.current_data[data_key]["gain"] = gain
+                self.current_data[data_key]["itime"] = itime
                 # Vypočítej SQM z raw dat
                 sqm_calc = calculate_sqm(int(full_raw), int(ir_raw), float(itime.rstrip('ms')), float(gain_str_to_float(gain)), self.sqm_zp)
                 if sqm_calc != float("inf"):
-                    self.lbl_sqm.setText(f"{sqm_calc:.2f}")
-                    self.current_data["light"]["sqm"] = sqm_calc
+                    lbl_sqm.setText(f"{sqm_calc:.2f}")
+                    self.current_data[data_key]["sqm"] = sqm_calc
                 else:
-                    self.lbl_sqm.setText("∞")
-                    self.current_data["light"]["sqm"] = None
-                
+                    lbl_sqm.setText("∞")
+                    self.current_data[data_key]["sqm"] = None
+
                 # Loguj do HDF5
                 if self.logging_enabled and self.logger:
                     try:
                         gain_map = {"1x": 1.0, "16x": 16.0, "25x": 25.0, "400x": 400.0, "428x": 428.0}
                         gain_val = gain_map.get(gain, 1.0)
-                        
+
                         expo_map = {"100ms": 100.0, "200ms": 200.0, "300ms": 300.0, "400ms": 400.0, "500ms": 500.0, "600ms": 600.0}
                         expo_val = expo_map.get(itime, 100.0)
-                        
-                        self.logger.log_light(full_raw, ir_raw, gain_val, expo_val)
+
+                        self.logger.log_light(channel, full_raw, ir_raw, gain_val, expo_val)
                     except Exception as e:
                         if self.debug:
                             print(f"Error logging light: {e}")
-                
+
                 self.update_data_table()
             return
 
@@ -1761,12 +1800,30 @@ class MainWindow(QtWidgets.QMainWindow):
                     'hygro_temp': f['hygro']['temp'][:] if 'hygro' in f else np.array([]),
                     'hygro_hum':  f['hygro']['hum'][:]  if 'hygro' in f else np.array([]),
                     'hygro_time': f['hygro']['time'][:] if 'hygro' in f else np.array([]),
-                    'light_all':  f['light']['all'][:]  if 'light' in f else np.array([]),
-                    'light_ir':   f['light']['ir'][:]   if 'light' in f else np.array([]),
-                    'light_gain': f['light']['gain'][:] if 'light' in f else np.array([]),
-                    'light_expo': f['light']['expo'][:] if 'light' in f else np.array([]),
-                    'light_time': f['light']['time'][:] if 'light' in f else np.array([]),
                 }
+
+                # Nový formát: /light0 a /light1 (odděleně dle kanálu muxu);
+                # starý formát (jednokanálový): /light -> naplní se jen light0.
+                for ch in (0, 1):
+                    gname = f"light{ch}"
+                    if gname in f:
+                        self.replay_data[f'light{ch}_all'] = f[gname]['all'][:]
+                        self.replay_data[f'light{ch}_ir'] = f[gname]['ir'][:]
+                        self.replay_data[f'light{ch}_gain'] = f[gname]['gain'][:]
+                        self.replay_data[f'light{ch}_expo'] = f[gname]['expo'][:]
+                        self.replay_data[f'light{ch}_time'] = f[gname]['time'][:]
+                    elif ch == 0 and 'light' in f:
+                        self.replay_data['light0_all'] = f['light']['all'][:]
+                        self.replay_data['light0_ir'] = f['light']['ir'][:]
+                        self.replay_data['light0_gain'] = f['light']['gain'][:]
+                        self.replay_data['light0_expo'] = f['light']['expo'][:]
+                        self.replay_data['light0_time'] = f['light']['time'][:]
+                    else:
+                        self.replay_data[f'light{ch}_all'] = np.array([])
+                        self.replay_data[f'light{ch}_ir'] = np.array([])
+                        self.replay_data[f'light{ch}_gain'] = np.array([])
+                        self.replay_data[f'light{ch}_expo'] = np.array([])
+                        self.replay_data[f'light{ch}_time'] = np.array([])
 
             n = len(self.replay_data['sky1_data'])
             n2 = len(self.replay_data['sky2_data'])
@@ -1875,20 +1932,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self.last_humidity = rh
             self.current_data["hygro"].update({"temp": t, "rh": rh, "dew_point": dew})
 
-        # Light (pokud dostupné)
-        if len(d['light_time']) > 0:
-            li = int(np.searchsorted(d['light_time'], ts_ns))
-            li = min(li, len(d['light_all']) - 1)
-            full = float(d['light_all'][li])
-            ir   = float(d['light_ir'][li])
-            gain = float(d['light_gain'][li])
-            expo = float(d['light_expo'][li])
-            self.lbl_full.setText(f"{full:.0f}")
-            self.lbl_ir.setText(f"{ir:.0f}")
-            self.lbl_gain.setText(f"{gain:.0f}x")
-            self.lbl_itime.setText(f"{expo:.0f}ms")
+        # Light (pokud dostupné) - kanál 0 a 1 zvlášť
+        light_labels = {
+            0: (self.lbl_full0, self.lbl_ir0, self.lbl_gain0, self.lbl_itime0, self.lbl_sqm0),
+            1: (self.lbl_full1, self.lbl_ir1, self.lbl_gain1, self.lbl_itime1, self.lbl_sqm1),
+        }
+        for ch in (0, 1):
+            time_arr = d[f'light{ch}_time']
+            if len(time_arr) == 0:
+                continue
+            li = int(np.searchsorted(time_arr, ts_ns))
+            li = min(li, len(d[f'light{ch}_all']) - 1)
+            full = float(d[f'light{ch}_all'][li])
+            ir   = float(d[f'light{ch}_ir'][li])
+            gain = float(d[f'light{ch}_gain'][li])
+            expo = float(d[f'light{ch}_expo'][li])
+            lbl_full, lbl_ir, lbl_gain, lbl_itime, lbl_sqm = light_labels[ch]
+            lbl_full.setText(f"{full:.0f}")
+            lbl_ir.setText(f"{ir:.0f}")
+            lbl_gain.setText(f"{gain:.0f}x")
+            lbl_itime.setText(f"{expo:.0f}ms")
             sqm_val = calculate_sqm(int(full), int(ir), expo, gain, self.sqm_zp)
-            self.lbl_sqm.setText(f"{sqm_val:.2f}" if sqm_val != float('inf') else "∞")
+            lbl_sqm.setText(f"{sqm_val:.2f}" if sqm_val != float('inf') else "∞")
 
         # MLX Ta z uložené teploty čipu
         chip_ta1 = float(d['sky1_temp'][idx])
