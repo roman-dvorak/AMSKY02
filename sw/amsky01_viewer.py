@@ -41,8 +41,9 @@ except ImportError:
     HDF5_AVAILABLE = False
 
 
-ROWS = 12
-COLS = 16
+# AMSKY02B: MLX90642 32x24 (nahrazuje starší MLX90641 16x12 z AMSKY01A/B)
+ROWS = 24
+COLS = 32
 PIXELS = ROWS * COLS
 
 # Korekční parametry
@@ -90,23 +91,28 @@ def parse_hygro(line: str):
 
 
 def parse_light(line: str):
-    """$light,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm"""
+    """$light,<channel>,normalized_lux,full_raw,ir_raw,gain,integration_time,sqm
+
+    AMSKY02B čte TSL2591 na obou kanálech I2C muxu, proto zpráva nově
+    obsahuje číslo kanálu (0 nebo 1) jako první pole.
+    """
     line = line.strip()
     if not line.startswith("$light,"):
         return None
     parts = line.split(",")
-    if len(parts) < 7:
+    if len(parts) < 8:
         return None
     try:
-        lux = float(parts[1])
-        full_raw = float(parts[2])
-        ir_raw = float(parts[3])
-        gain = parts[4]
-        itime = parts[5]
-        sqm = float(parts[6])
+        channel = int(parts[1])
+        lux = float(parts[2])
+        full_raw = float(parts[3])
+        ir_raw = float(parts[4])
+        gain = parts[5]
+        itime = parts[6]
+        sqm = float(parts[7])
     except ValueError:
         return None
-    return lux, full_raw, ir_raw, gain, itime, sqm
+    return channel, lux, full_raw, ir_raw, gain, itime, sqm
 
 
 def parse_cloud_meta(line: str):
@@ -793,7 +799,7 @@ class HeadlessRunner:
             v = parse_light(s)
             if v is None:
                 return
-            lux, full_raw, ir_raw, gain, itime, sqm_fw = v
+            channel, lux, full_raw, ir_raw, gain, itime, sqm_fw = v
             self.counters["light"] += 1
             try:
                 gain_val = gain_str_to_float(gain)
@@ -803,10 +809,12 @@ class HeadlessRunner:
                 sqm_str = f"{sqm_calc:.2f}" if sqm_calc != float('inf') else "inf"
             except Exception:
                 gain_val, itime_val, sqm_str = 1.0, 100.0, "n/a"
-            self._vlog(f"light: full={full_raw:.0f} ir={ir_raw:.0f} "
+            self._vlog(f"light ch{channel}: full={full_raw:.0f} ir={ir_raw:.0f} "
                        f"gain={gain} int={itime} lux={lux:.4f} sqm={sqm_str}")
             if self.logger:
                 try:
+                    # Pozn.: log_light zatím nerozlišuje kanál muxu, oba
+                    # TSL2591 se logují do stejné datové sady.
                     self.logger.log_light(full_raw, ir_raw, gain_val, itime_val)
                 except Exception as e:
                     print(f"chyba logování light: {e}", file=sys.stderr)
@@ -1535,7 +1543,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.startswith("$light,"):
             v = parse_light(s)
             if v is not None:
-                lux, full_raw, ir_raw, gain, itime, sqm = v
+                # Pozn.: GUI zatím zobrazuje jen poslední přijatý kanál
+                # (0 nebo 1); oba TSL2591 posílají $light v pravidelném cyklu.
+                channel, lux, full_raw, ir_raw, gain, itime, sqm = v
                 self.lbl_full.setText(f"{full_raw:.0f}")
                 self.lbl_ir.setText(f"{ir_raw:.0f}")
                 self.lbl_gain.setText(gain)
