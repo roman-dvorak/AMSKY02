@@ -1,17 +1,14 @@
-# AMSKY01 — Host software for AstroMeters sky quality & cloud sensors
+# AMSKY02 — Host software for the AstroMeters sky quality & cloud sensor
 
 <p align="center">
   <img width="200" height="200" alt="AstroMeters Logo" src="https://github.com/user-attachments/assets/2135c8e6-5789-47cd-ac9b-e2287eecc98f" />
 </p>
 
-Python host-side tools for the [AstroMeters](https://astrometers.eu) all-sky sensors:
-a real-time GUI viewer, a headless logger, a terminal UI client, and a log plotting
-tool.
+Python host-side tools for the [AstroMeters](https://astrometers.eu) **AMSKY02** all-sky
+sensor: a real-time GUI viewer, a headless logger, a terminal UI client, and a log
+plotting tool.
 
-**This release (1.1.0) targets the AMSKY02B protocol.** For AMSKY01A/B hardware, see
-[Supported hardware](#supported-hardware) below.
-
-These sensors combine two measurements that matter to astronomers and observatories:
+The sensor combines two measurements that matter to astronomers and observatories:
 
 - **Sky Quality Meter (SQM)** — sky brightness in mag/arcsec², for light pollution assessment
 - **Cloud detection** — thermal IR sky temperature, for fast and reliable cloud coverage detection
@@ -20,22 +17,25 @@ The device streams CSV-style lines over USB CDC serial (115200 baud) or RS485. T
 package parses that stream, visualises it, serves it over HTTP, and archives it to
 HDF5 or CSV.
 
-**Product page:** https://astrometers.eu/products/AMSKY01/
-**Documentation:** https://astrometers.eu/docs/AMSKY01/
-**Source:** https://github.com/AstroMeters/AMSKY01
+> **Using the older AMSKY01?** Its protocol differs (no sensor/channel index, 16×12
+> thermal map) and is not handled by this package. Install
+> [`amsky01`](https://pypi.org/project/amsky01/) instead.
+
+**Product page:** https://astrometers.eu
+**Source:** https://github.com/roman-dvorak/AMSKY02
 
 ---
 
 ## Installation
 
 ```bash
-pip install amsky01
+pip install amsky02
 ```
 
 This pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and psutil.
 
 If you only need headless logging on a small machine (e.g. a Raspberry Pi in an
-observatory), install into a virtual environment — the Qt dependency is large but the
+observatory), install into a virtual environment — the Qt dependency is large, but the
 viewer runs fine with `--headless` and no display attached.
 
 ### Serial port permissions (Linux)
@@ -52,23 +52,23 @@ sudo usermod -aG dialout $USER   # log out and back in
 
 Installing the package provides three commands.
 
-### `amsky01-viewer` — real-time GUI viewer
+### `amsky02-viewer` — real-time GUI viewer
 
 The main application. Shows a live thermal map, sky quality, environmental data and
 per-channel light readings, with optional HDF5 logging and an HTTP JSON API.
 
 ```bash
 # Live view from a connected sensor
-amsky01-viewer --port /dev/ttyACM0
+amsky02-viewer --port /dev/ttyACM0
 
 # Live view with HDF5 logging and the HTTP API enabled
-amsky01-viewer --port /dev/ttyACM0 --log --api
+amsky02-viewer --port /dev/ttyACM0 --log --api
 
 # Replay a recorded HDF5 session at 4x speed
-amsky01-viewer --replay AMSKY01_20260502_18.h5 --replay-speed 4
+amsky02-viewer --replay session.h5 --replay-speed 4
 
 # Headless logging on a machine with no display
-amsky01-viewer --port /dev/ttyACM0 --headless --log --verbose
+amsky02-viewer --port /dev/ttyACM0 --headless --log --verbose
 ```
 
 | Option | Description |
@@ -89,51 +89,41 @@ amsky01-viewer --port /dev/ttyACM0 --headless --log --verbose
 | `--stats-interval S` | Status summary interval in headless mode |
 | `--debug` | Show every message received on the serial line |
 
-### `amsky01-cli` — terminal client
+### `amsky02-cli` — terminal client
 
 A curses-based terminal UI with automatic CSV logging and rotation. Also usable over
-TCP instead of a serial port, which is handy when the sensor is exposed by a serial-to-
-network bridge.
+TCP instead of a serial port, which is handy when the sensor is exposed by a
+serial-to-network bridge.
 
 ```bash
-amsky01-cli --list-ports                    # discover connected devices
-amsky01-cli --port /dev/ttyACM0 --log       # TUI with CSV logging
-amsky01-cli --tcp 4001 --host observatory   # read from a network bridge
-amsky01-cli --port /dev/ttyACM0 --no-tui    # plain line output, good for pipes
+amsky02-cli --list-ports                    # discover connected devices
+amsky02-cli --port /dev/ttyACM0 --log       # TUI with CSV logging
+amsky02-cli --tcp 4001 --host observatory   # read from a network bridge
+amsky02-cli --port /dev/ttyACM0 --no-tui    # plain line output, good for pipes
 ```
 
-### `amsky01-plot` — plot recorded CSV logs
+### `amsky02-plot` — plot recorded CSV logs
 
 ```bash
-amsky01-plot data.csv                            # write amsky01_plots.png
-amsky01-plot --interactive data.csv              # interactive window
-amsky01-plot -i -r 30 -o myplot.png data.csv     # interactive, refresh every 30 s
-amsky01-plot file1.csv file2.csv                 # combine several logs
+amsky02-plot data.csv                            # write amsky02_plots.png
+amsky02-plot --interactive data.csv              # interactive window
+amsky02-plot -i -r 30 -o myplot.png data.csv     # interactive, refresh every 30 s
+amsky02-plot file1.csv file2.csv                 # combine several logs
 ```
 
 ---
 
-## Supported hardware
+## Hardware
 
-| Model | Thermal sensor | Light sensors | Supported by this release |
-| --- | --- | --- | --- |
-| AMSKY02B | MLX90642, 32×24 | 2× TSL2591 behind a PCA9543A I²C mux | Yes |
-| AMSKY01A / AMSKY01B | MLX90641, 16×12 | 1× TSL2591 | No — use `amsky01==1.0.0` |
+| | |
+| --- | --- |
+| Thermal | 2× MLX90642, 32×24 pixels |
+| Light / SQM | 2× TSL2591 behind a PCA9543A I²C multiplexer |
+| Environment | SHT4x — temperature, humidity, dew point |
+| Interfaces | USB-C (CDC serial) and RS485 |
 
-> **Important:** this release targets the **AMSKY02B** protocol, in which every data
-> message carries a leading sensor/channel index and the thermal map is 32×24. The
-> resolution is fixed, not auto-detected. The older AMSKY01A/B protocol — no index
-> field, 16×12 map — is **not** parsed by this version. If you have an AMSKY01A/B,
-> pin the previous release:
->
-> ```bash
-> pip install "amsky01==1.0.0"
-> ```
-
-On AMSKY02B the two TSL2591 channels are shown and logged separately as **LIGHT0**
-and **LIGHT1**, and the two thermal sensors are displayed side by side.
-
-Environmental data comes from an SHT4x (temperature, humidity, dew point).
+The two TSL2591 channels are shown and logged separately as **LIGHT0** and **LIGHT1**,
+and the two thermal sensors are displayed side by side as a single combined map.
 
 ---
 
@@ -163,7 +153,7 @@ Notes:
 - `$hygro` is the only message with no index field.
 
 Device configuration is stored in EEPROM and survives power cycles. See the
-[protocol documentation](https://github.com/AstroMeters/AMSKY01#communication-protocol)
+[protocol documentation](https://github.com/roman-dvorak/AMSKY02#communication-protocol)
 for the full command set, including SQM calibration and the hardware alert output.
 
 ---
@@ -206,12 +196,18 @@ watchdog, or a home automation system without parsing the serial stream yourself
 The modules are importable, so you can reuse the protocol parsing directly:
 
 ```python
-from amsky01_viewer import parse_light
+from amsky02_viewer import parse_light, parse_cloud
 
 channel, lux, full_raw, ir_raw, gain, itime, sqm = parse_light(
     "$light,0,12.34,1000,200,1,100,21.50"
 )
+sensor_id, tl, tr, bl, br, center = parse_cloud(
+    "$cloud,1,-20.1,-20.2,-20.3,-20.4,-21.0"
+)
 ```
+
+Each parser returns `None` for a line it does not recognise or cannot parse, so they
+are safe to apply to a raw serial stream.
 
 ---
 
@@ -219,9 +215,8 @@ channel, lux, full_raw, ir_raw, gain, itime, sqm = parse_light(
 
 **Roman Dvořák**, AstroMeters — info@astrometers.eu
 
-To purchase AMSKY01 or AMSKY02B, or for integration support, get in touch at
-**info@astrometers.eu**.
+To purchase AMSKY02, or for integration support, get in touch at **info@astrometers.eu**.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/AstroMeters/AMSKY01/blob/main/LICENSE).
+MIT — see [LICENSE](https://github.com/roman-dvorak/AMSKY02/blob/main/LICENSE).

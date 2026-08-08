@@ -1,18 +1,18 @@
-# AMSKY01: Sky Quality & Cloud Detection Sensor
+# AMSKY02: Sky Quality & Cloud Detection Sensor
 
 <p align="center">
   <img width="200" height="200" alt="AstroMeters Logo" src="https://github.com/user-attachments/assets/2135c8e6-5789-47cd-ac9b-e2287eecc98f" />
 </p>
 
 
-[AMSKY01](https://astrometers.eu/products/AMSKY01/) is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
+[AMSKY02](https://astrometers.eu) is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
 - **Sky Quality Meter (SQM)** - measures sky brightness for light pollution assessment
 - **Cloud Detector** - uses thermal IR sky temperature measurement to detect cloud coverage
 
-With both USB (CDC serial) and RS485 interfaces, AMSKY01 integrates easily into observatory automation systems, building management systems, or connects directly to computers for monitoring and data logging.
+With both USB (CDC serial) and RS485 interfaces, AMSKY02 integrates easily into observatory automation systems, building management systems, or connects directly to computers for monitoring and data logging.
 
-**Product page:** https://astrometers.eu/products/AMSKY01/  
-**Documentation:** https://astrometers.eu/docs/AMSKY01/
+**Product page:** https://astrometers.eu  
+**Python host software:** [`pip install amsky02`](https://pypi.org/project/amsky02/)
 
 ## Key Features
 
@@ -32,22 +32,38 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY01 integrates easily into 
 
 ## Where to Get It
 
-To purchase AMSKY01 or for more information, contact us at **info@astrometers.eu**
+To purchase AMSKY02 or for more information, contact us at **info@astrometers.eu**
+
+## Python Host Software
+
+The `sw/` directory contains the host-side tools, also published on PyPI:
+
+```bash
+pip install amsky02
+```
+
+| Command | Purpose |
+| --- | --- |
+| `amsky02-viewer` | Real-time GUI viewer — thermal map, SQM, environment; HDF5 logging, HTTP JSON API, `--headless` mode, `--replay` of recorded sessions |
+| `amsky02-cli` | Terminal (curses) client with CSV logging, works over serial or TCP |
+| `amsky02-plot` | Plot recorded CSV logs to PNG or an interactive window |
+
+See [README_PyPI.md](README_PyPI.md) for full usage, options and the HDF5 layout.
 
 ## Communication Protocol
 
-AMSKY01 outputs data via USB CDC serial at 115200 baud in CSV format. All data messages start with `$` prefix. Lines starting with `#` are comments/debug messages for human readability and should be ignored by parsing software.
+AMSKY02 outputs data via USB CDC serial at 115200 baud in CSV format. All data messages start with `$` prefix. Lines starting with `#` are comments/debug messages for human readability and should be ignored by parsing software.
 
 ### Startup Messages
 
 ```
-# AMSKY01A
+# AMSKY02B
 # Serial Number: <serial_number>
 # FW Version: <version>
 # Git Hash: <hash>
 # Git Branch: <branch>
 #
-$HELLO,AMSKY01A,<serial_number>,<fw_version>,<git_hash>,<git_branch>
+$HELLO,AMSKY02B,<serial_number>,<fw_version>,<git_hash>,<git_branch>
 ```
 
 The `$HELLO` message contains structured device identification for automated parsing:
@@ -57,8 +73,9 @@ The `$HELLO` message contains structured device identification for automated par
 
 **Sky Quality (SQM) Data:**
 ```
-$light,<lux>,<full_raw>,<ir_raw>,<gain>,<integration_time>,<sqm>
+$light,<channel>,<lux>,<full_raw>,<ir_raw>,<gain>,<integration_time>,<sqm>
 ```
+- `channel` - TSL2591 channel behind the PCA9543A I²C mux (0 or 1)
 - `lux` - Normalized lux value (2 decimal places)
 - `full_raw` - Raw full spectrum sensor reading
 - `ir_raw` - Raw infrared sensor reading
@@ -68,8 +85,9 @@ $light,<lux>,<full_raw>,<ir_raw>,<gain>,<integration_time>,<sqm>
 
 **Cloud Detection Data:**
 ```
-$cloud,<tl>,<tr>,<bl>,<br>,<center>
+$cloud,<sensor_id>,<tl>,<tr>,<bl>,<br>,<center>
 ```
+- `sensor_id` - Which of the two MLX90642 sensors the reading comes from
 - `tl`, `tr`, `bl`, `br` - Corner temperatures in °C (top-left, top-right, bottom-left, bottom-right)
 - `center` - Center sky temperature in °C
 
@@ -83,8 +101,9 @@ $hygro,<temperature>,<humidity>,<dew_point>
 
 **Cloud Sensor Metadata:**
 ```
-$cloud_meta,<vdd>,<ta>
+$cloud_meta,<sensor_id>,<vdd>,<ta>
 ```
+- `sensor_id` - Which of the two MLX90642 sensors
 - `vdd` - Sensor supply voltage
 - `ta` - Ambient temperature from thermal sensor
 
@@ -93,14 +112,14 @@ $cloud_meta,<vdd>,<ta>
 Send commands via serial (115200 baud) to configure the device:
 
 **Thermal Map:**
-- `thrmap_on` - Enable full 16×12 thermal map output
+- `thrmap_on` - Enable full 32×24 thermal map output
 - `thrmap_off` - Disable thermal map output
 
 When enabled, device outputs:
 ```
-$thrmap,<pixel0>,<pixel1>,...,<pixel191>
+$thrmap,<sensor_id>,<pixel0>,<pixel1>,...,<pixel767>
 ```
-192 temperature values in °C (16×12 array)
+768 temperature values in °C (32×24 array), per sensor
 
 **Configuration:**
 

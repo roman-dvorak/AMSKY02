@@ -342,7 +342,7 @@ class DataLogger:
         # Create directories if they don't exist
         os.makedirs(day_dir, exist_ok=True)
         
-        filename = f"amsky01_data_{timestamp.strftime('%Y%m%d_%H%M%S')}_UTC.csv"
+        filename = f"amsky02_data_{timestamp.strftime('%Y%m%d_%H%M%S')}_UTC.csv"
         filepath = os.path.join(day_dir, filename)
         
         try:

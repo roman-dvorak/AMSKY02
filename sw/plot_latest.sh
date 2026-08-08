@@ -93,7 +93,7 @@ plot_file() {
             source "$SCRIPT_DIR/venv/bin/activate"
         fi
         
-        python3 "$SCRIPT_DIR/amsky01_plot.py" "$file"
+        python3 "$SCRIPT_DIR/amsky02_plot.py" "$file"
     fi
 }
 

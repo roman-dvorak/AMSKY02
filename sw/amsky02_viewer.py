@@ -11,11 +11,11 @@ Závislosti:
     pip install pyserial numpy pyqtgraph PySide6 h5py
 
 Spuštění (příklad):
-    python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200
-    python amsky01_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
-    python amsky01_viewer.py --replay AMSKY01_20260502_18.h5
-    python amsky01_viewer.py --replay AMSKY01_20260502_18.h5 --replay-speed 5
-    python amsky01_viewer.py --port /dev/ttyACM0 --headless --log --verbose
+    python amsky02_viewer.py --port /dev/ttyACM0 --baud 115200
+    python amsky02_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
+    python amsky02_viewer.py --replay AMSKY01_20260502_18.h5
+    python amsky02_viewer.py --replay AMSKY01_20260502_18.h5 --replay-speed 5
+    python amsky02_viewer.py --port /dev/ttyACM0 --headless --log --verbose
 """
 
 import argparse

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=AMSKY02 Viewer
+Exec=amsky02_viewer
+Icon=amsky02_viewer
+Type=Application
+Categories=Science;Education;Astronomy;
+Comment=AMSKY02 Sensor Data Viewer - Real-time visualization of sky quality and cloud data
+Terminal=false
+StartupNotify=true
