@@ -4,7 +4,7 @@
   <img width="200" height="200" alt="AstroMeters Logo" src="https://github.com/user-attachments/assets/2135c8e6-5789-47cd-ac9b-e2287eecc98f" />
 </p>
 
-Python host-side tools for the [AstroMeters](https://astrometers.eu) **AMSKY02** all-sky
+Python host-side tools for the [AstroMeters](https://astrometers.eu/products/AMSKY02/) **AMSKY02** all-sky
 sensor: a real-time GUI viewer, a headless logger, a terminal UI client, and a log
 plotting tool.
 
@@ -21,8 +21,9 @@ HDF5 or CSV.
 > thermal map) and is not handled by this package. Install
 > [`amsky01`](https://pypi.org/project/amsky01/) instead.
 
-**Product page:** https://astrometers.eu
-**Source:** https://github.com/roman-dvorak/AMSKY02
+- **Product page:** https://astrometers.eu/products/AMSKY02/
+- **Documentation:** https://astrometers.eu/docs/AMSKY/
+- **Source:** https://github.com/roman-dvorak/AMSKY02
 
 ---
 
@@ -153,7 +154,7 @@ Notes:
 - `$hygro` is the only message with no index field.
 
 Device configuration is stored in EEPROM and survives power cycles. See the
-[protocol documentation](https://github.com/roman-dvorak/AMSKY02#communication-protocol)
+[protocol documentation](https://astrometers.eu/docs/AMSKY/)
 for the full command set, including SQM calibration and the hardware alert output.
 
 ---

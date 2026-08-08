@@ -5,13 +5,14 @@
 </p>
 
 
-[AMSKY02](https://astrometers.eu) is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
+[AMSKY02](https://astrometers.eu/products/AMSKY02/) is a specialized sensor for astronomers and observatories. It combines two essential measurements in one device:
 - **Sky Quality Meter (SQM)** - measures sky brightness for light pollution assessment
 - **Cloud Detector** - uses thermal IR sky temperature measurement to detect cloud coverage
 
 With both USB (CDC serial) and RS485 interfaces, AMSKY02 integrates easily into observatory automation systems, building management systems, or connects directly to computers for monitoring and data logging.
 
-**Product page:** https://astrometers.eu  
+**Product page:** https://astrometers.eu/products/AMSKY02/  
+**Documentation:** https://astrometers.eu/docs/AMSKY/  
 **Python host software:** [`pip install amsky02`](https://pypi.org/project/amsky02/)
 
 ## Key Features
