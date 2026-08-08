@@ -10,7 +10,7 @@ Group=roman
 WorkingDirectory=/var/lib/amsky02
 Environment=HOME=/home/roman
 Environment=XDG_RUNTIME_DIR=/run/user/1000
-ExecStart=/usr/local/bin/amsky02-cli --tcp 2000 --no-tui --log
+ExecStart=/usr/local/bin/amsky-cli --tcp 2000 --no-tui --log
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

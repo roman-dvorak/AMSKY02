@@ -1,12 +1,14 @@
-# AMSKY02 — Host software for the AstroMeters sky quality & cloud sensor
+# AMSKY — Host software for AstroMeters sky quality & cloud sensors
 
 <p align="center">
   <img width="200" height="200" alt="AstroMeters Logo" src="https://github.com/user-attachments/assets/2135c8e6-5789-47cd-ac9b-e2287eecc98f" />
 </p>
 
-Python host-side tools for the [AstroMeters](https://astrometers.eu/products/AMSKY02/) **AMSKY02** all-sky
-sensor: a real-time GUI viewer, a headless logger, a terminal UI client, and a log
-plotting tool.
+Python host-side tools for the [AstroMeters](https://astrometers.eu/products/AMSKY02/) AMSKY
+all-sky sensors: a real-time GUI viewer, a headless logger, a terminal UI client, and a
+log plotting tool.
+
+**This release supports the AMSKY02 protocol.**
 
 The sensor combines two measurements that matter to astronomers and observatories:
 
@@ -18,7 +20,7 @@ package parses that stream, visualises it, serves it over HTTP, and archives it 
 HDF5 or CSV.
 
 > **Using the older AMSKY01?** Its protocol differs (no sensor/channel index, 16×12
-> thermal map) and is not handled by this package. Install
+> thermal map) and is not handled by this release. Install
 > [`amsky01`](https://pypi.org/project/amsky01/) instead.
 
 - **Product page:** https://astrometers.eu/products/AMSKY02/
@@ -30,7 +32,7 @@ HDF5 or CSV.
 ## Installation
 
 ```bash
-pip install amsky02
+pip install amsky
 ```
 
 This pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and psutil.
@@ -53,23 +55,23 @@ sudo usermod -aG dialout $USER   # log out and back in
 
 Installing the package provides three commands.
 
-### `amsky02-viewer` — real-time GUI viewer
+### `amsky-viewer` — real-time GUI viewer
 
 The main application. Shows a live thermal map, sky quality, environmental data and
 per-channel light readings, with optional HDF5 logging and an HTTP JSON API.
 
 ```bash
 # Live view from a connected sensor
-amsky02-viewer --port /dev/ttyACM0
+amsky-viewer --port /dev/ttyACM0
 
 # Live view with HDF5 logging and the HTTP API enabled
-amsky02-viewer --port /dev/ttyACM0 --log --api
+amsky-viewer --port /dev/ttyACM0 --log --api
 
 # Replay a recorded HDF5 session at 4x speed
-amsky02-viewer --replay session.h5 --replay-speed 4
+amsky-viewer --replay session.h5 --replay-speed 4
 
 # Headless logging on a machine with no display
-amsky02-viewer --port /dev/ttyACM0 --headless --log --verbose
+amsky-viewer --port /dev/ttyACM0 --headless --log --verbose
 ```
 
 | Option | Description |
@@ -90,26 +92,26 @@ amsky02-viewer --port /dev/ttyACM0 --headless --log --verbose
 | `--stats-interval S` | Status summary interval in headless mode |
 | `--debug` | Show every message received on the serial line |
 
-### `amsky02-cli` — terminal client
+### `amsky-cli` — terminal client
 
 A curses-based terminal UI with automatic CSV logging and rotation. Also usable over
 TCP instead of a serial port, which is handy when the sensor is exposed by a
 serial-to-network bridge.
 
 ```bash
-amsky02-cli --list-ports                    # discover connected devices
-amsky02-cli --port /dev/ttyACM0 --log       # TUI with CSV logging
-amsky02-cli --tcp 4001 --host observatory   # read from a network bridge
-amsky02-cli --port /dev/ttyACM0 --no-tui    # plain line output, good for pipes
+amsky-cli --list-ports                    # discover connected devices
+amsky-cli --port /dev/ttyACM0 --log       # TUI with CSV logging
+amsky-cli --tcp 4001 --host observatory   # read from a network bridge
+amsky-cli --port /dev/ttyACM0 --no-tui    # plain line output, good for pipes
 ```
 
-### `amsky02-plot` — plot recorded CSV logs
+### `amsky-plot` — plot recorded CSV logs
 
 ```bash
-amsky02-plot data.csv                            # write amsky02_plots.png
-amsky02-plot --interactive data.csv              # interactive window
-amsky02-plot -i -r 30 -o myplot.png data.csv     # interactive, refresh every 30 s
-amsky02-plot file1.csv file2.csv                 # combine several logs
+amsky-plot data.csv                            # write amsky_plots.png
+amsky-plot --interactive data.csv              # interactive window
+amsky-plot -i -r 30 -o myplot.png data.csv     # interactive, refresh every 30 s
+amsky-plot file1.csv file2.csv                 # combine several logs
 ```
 
 ---
@@ -197,7 +199,7 @@ watchdog, or a home automation system without parsing the serial stream yourself
 The modules are importable, so you can reuse the protocol parsing directly:
 
 ```python
-from amsky02_viewer import parse_light, parse_cloud
+from amsky_viewer import parse_light, parse_cloud
 
 channel, lux, full_raw, ir_raw, gain, itime, sqm = parse_light(
     "$light,0,12.34,1000,200,1,100,21.50"

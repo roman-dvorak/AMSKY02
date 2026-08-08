@@ -4,7 +4,7 @@ Tools for working with AMSKY01 sensors (MLX90641, SHT4x, TSL2591).
 
 ## Real-time Monitoring Tools
 
-### `amsky02_viewer.py`
+### `amsky_viewer.py`
 GUI visualizer with PyQt/PyQtGraph for real-time data display:
 - IR thermal map from MLX90641 (12×16 pixels)
 - Temperature and humidity from SHT4x including dew point
@@ -13,13 +13,13 @@ GUI visualizer with PyQt/PyQtGraph for real-time data display:
 
 **Usage:**
 ```bash
-python amsky02_viewer.py --port /dev/ttyACM0 --baud 115200
-python amsky02_viewer.py --port /dev/ttyACM0 --debug  # with communication output
+python amsky_viewer.py --port /dev/ttyACM0 --baud 115200
+python amsky_viewer.py --port /dev/ttyACM0 --debug  # with communication output
 ```
 
 ---
 
-### `amsky02_cli.py`
+### `amsky_cli.py`
 CLI viewer with curses interface + automatic CSV logging:
 - Real-time sensor data display in terminal
 - Automatic data saving to CSV files
@@ -27,7 +27,7 @@ CLI viewer with curses interface + automatic CSV logging:
 
 **Usage:**
 ```bash
-python amsky02_cli.py --port /dev/ttyACM0 --baud 115200
+python amsky_cli.py --port /dev/ttyACM0 --baud 115200
 ```
 
 **Dependencies:** `pyserial`, `curses`
@@ -36,7 +36,7 @@ python amsky02_cli.py --port /dev/ttyACM0 --baud 115200
 
 ## Log Analysis Tools
 
-### `amsky02_plot.py`
+### `amsky_plot.py`
 Plot graphs from saved CSV logs:
 - Support for multiple files simultaneously
 - Interactive mode with auto-refresh
@@ -44,9 +44,9 @@ Plot graphs from saved CSV logs:
 
 **Usage:**
 ```bash
-amsky02-plot sensor_logs/latest.csv
-amsky02-plot --interactive --refresh 30 sensor_logs/*.csv
-amsky02-plot --output myplot.png sensor_logs/data.csv
+amsky-plot sensor_logs/latest.csv
+amsky-plot --interactive --refresh 30 sensor_logs/*.csv
+amsky-plot --output myplot.png sensor_logs/data.csv
 ```
 
 **Dependencies:** `pandas`, `matplotlib`, `numpy`

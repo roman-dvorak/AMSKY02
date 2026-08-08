@@ -46,7 +46,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/p/amsky02
+      url: https://pypi.org/p/amsky
 
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing

@@ -13,7 +13,7 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY02 integrates easily into 
 
 **Product page:** https://astrometers.eu/products/AMSKY02/  
 **Documentation:** https://astrometers.eu/docs/AMSKY/  
-**Python host software:** [`pip install amsky02`](https://pypi.org/project/amsky02/)
+**Python host software:** [`pip install amsky`](https://pypi.org/project/amsky/)
 
 ## Key Features
 
@@ -40,14 +40,14 @@ To purchase AMSKY02 or for more information, contact us at **info@astrometers.eu
 The `sw/` directory contains the host-side tools, also published on PyPI:
 
 ```bash
-pip install amsky02
+pip install amsky
 ```
 
 | Command | Purpose |
 | --- | --- |
-| `amsky02-viewer` | Real-time GUI viewer — thermal map, SQM, environment; HDF5 logging, HTTP JSON API, `--headless` mode, `--replay` of recorded sessions |
-| `amsky02-cli` | Terminal (curses) client with CSV logging, works over serial or TCP |
-| `amsky02-plot` | Plot recorded CSV logs to PNG or an interactive window |
+| `amsky-viewer` | Real-time GUI viewer — thermal map, SQM, environment; HDF5 logging, HTTP JSON API, `--headless` mode, `--replay` of recorded sessions |
+| `amsky-cli` | Terminal (curses) client with CSV logging, works over serial or TCP |
+| `amsky-plot` | Plot recorded CSV logs to PNG or an interactive window |
 
 See [README_PyPI.md](README_PyPI.md) for full usage, options and the HDF5 layout.
 

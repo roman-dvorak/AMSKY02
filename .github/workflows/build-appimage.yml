@@ -74,14 +74,14 @@ jobs:
           
           # Vytvoř PyInstaller spec
           pyinstaller --onefile --windowed --strip \
-                      --name amsky02_viewer \
+                      --name amsky_viewer \
                       --hidden-import PySide6 \
                       --hidden-import pyqtgraph \
                       --hidden-import numpy \
                       --hidden-import serial \
                       --exclude-module h5py \
                       --exclude-module pandas --exclude-module matplotlib --exclude-module psutil \
-                      sw/amsky02_viewer.py
+                      sw/amsky_viewer.py
           
           # Vytvoř AppDir strukturu
           mkdir -p AppDir/usr/bin
@@ -89,17 +89,17 @@ jobs:
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           
           # Zkopíruj executable a zkus ho ještě zmenšit UPX/strip (best effort)
-          cp dist/amsky02_viewer AppDir/usr/bin/
-          strip AppDir/usr/bin/amsky02_viewer || true
-          upx -q AppDir/usr/bin/amsky02_viewer || true
+          cp dist/amsky_viewer AppDir/usr/bin/
+          strip AppDir/usr/bin/amsky_viewer || true
+          upx -q AppDir/usr/bin/amsky_viewer || true
           
           # Zkopíruj desktop file na správné místo (kořen AppDir)
-          cp sw/amsky02_viewer.desktop AppDir/
+          cp sw/amsky_viewer.desktop AppDir/
           # Volitelně i do standardní cesty
           mkdir -p AppDir/usr/share/applications
-          cp sw/amsky02_viewer.desktop AppDir/usr/share/applications/
+          cp sw/amsky_viewer.desktop AppDir/usr/share/applications/
           # AppRun spouštěč (ukáže na binárku v usr/bin)
-          ln -sf usr/bin/amsky02_viewer AppDir/AppRun
+          ln -sf usr/bin/amsky_viewer AppDir/AppRun
           
           # Vytvoř placeholder ikonu (PNG 256x256)
           python3 << 'PYTHON'
@@ -121,12 +121,12 @@ jobs:
           y = (256 - text_height) // 2
           draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
           
-          img.save('/workspace/AppDir/usr/share/icons/hicolor/256x256/apps/amsky02_viewer.png')
+          img.save('/workspace/AppDir/usr/share/icons/hicolor/256x256/apps/amsky_viewer.png')
           
           PYTHON
           
           # Zkopíruj ikonu i do kořene AppDir (pro jistotu kvůli desktop souboru)
-          cp AppDir/usr/share/icons/hicolor/256x256/apps/amsky02_viewer.png AppDir/ || true
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/amsky_viewer.png AppDir/ || true
 
           # Stáhni appimagetool
           cd /workspace
@@ -147,10 +147,10 @@ jobs:
           fi
           
           # Vytvoř AppImage
-          APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" $APPIMAGETOOL --no-appstream AppDir amsky02_viewer-${ARCH}.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" $APPIMAGETOOL --no-appstream AppDir amsky_viewer-${ARCH}.AppImage
           
-          echo "AppImage vytvořen: amsky02_viewer-${ARCH}.AppImage"
-          ls -lh amsky02_viewer-*.AppImage
+          echo "AppImage vytvořen: amsky_viewer-${ARCH}.AppImage"
+          ls -lh amsky_viewer-*.AppImage
           EOF
           
           chmod +x build_appimage.sh
@@ -176,14 +176,14 @@ jobs:
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
-          name: amsky02_viewer-${{ matrix.arch }}-AppImage
-          path: amsky02_viewer-${{ matrix.arch }}.AppImage
+          name: amsky_viewer-${{ matrix.arch }}-AppImage
+          path: amsky_viewer-${{ matrix.arch }}.AppImage
           retention-days: 30
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: amsky02_viewer-${{ matrix.arch }}.AppImage
+          files: amsky_viewer-${{ matrix.arch }}.AppImage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
