@@ -6,36 +6,42 @@
 MLX90641::MLX90641()
 {
     _wire = nullptr;
+    i2cAddr = MLX90641_I2C_ADDR_DEFAULT;
     initialized = false;
     hasValidFrame = false;
 }
 
-bool MLX90641::begin(TwoWire *wire)
+bool MLX90641::begin(TwoWire *wire, uint8_t addr)
 {
     _wire = wire;
+    i2cAddr = addr;
     initialized = false;
     hasValidFrame = false;
 
     if (_wire == nullptr)
     {
-        Serial.println("# MLX90641: invalid Wire instance");
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.println("): invalid Wire instance");
         return false;
     }
 
-    // Inicializace I2C driveru knihovny (frekvence nastavíme na 400 kHz)
+    // Inicializace I2C driveru knihovny (frekvence nastavíme na 1 MHz)
     MLX90641_I2CInit();
-    MLX90641_I2CFreqSet(400);
+    MLX90641_I2CFreqSet(1000);
 
     // Ověření I2C spojení jednoduchým přenosem
-    _wire->beginTransmission(MLX90641_I2C_ADDR);
+    _wire->beginTransmission(i2cAddr);
     if (_wire->endTransmission() != 0)
     {
-        Serial.println("# MLX90641 thermal sensor initialization failed (I2C)");
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.println(") thermal sensor initialization failed (I2C)");
         return false;
     }
 
     // Načtení EEPROM a kalibračních parametrů
-    int status = MLX90641_DumpEE(MLX90641_I2C_ADDR, eeData);
+    int status = MLX90641_DumpEE(i2cAddr, eeData);
     if (status != 0)
     {
         Serial.print("# MLX90641_DumpEE failed, err=");
@@ -46,22 +52,39 @@ bool MLX90641::begin(TwoWire *wire)
     status = MLX90641_ExtractParameters(eeData, &calibration);
     if (status != 0)
     {
-        Serial.print("# MLX90641_ExtractParameters failed, err=");
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.print(") ExtractParameters failed, err=");
         Serial.println(status);
         return false;
     }
 
-    // Nastavíme refresh rate na 4 Hz (011b), aby byl rozumný kompromis mezi šumem a rychlostí
-    status = MLX90641_SetRefreshRate(MLX90641_I2C_ADDR, 0b011);
+    // Nastavíme refresh rate na 4 Hz (011b)
+    status = MLX90641_SetRefreshRate(i2cAddr, 0b011);
     if (status != 0)
     {
-        Serial.print("# MLX90641_SetRefreshRate failed, err=");
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.print(") SetRefreshRate failed, err=");
+        Serial.println(status);
+        // Nebereme jako fatální chybu
+    }
+
+    // Nastavíme ADC rozlišení na 19 bit (3) pro nejnižší šum
+    status = MLX90641_SetResolution(i2cAddr, 3);
+    if (status != 0)
+    {
+        Serial.print("# MLX90641 (0x");
+        Serial.print(i2cAddr, HEX);
+        Serial.print(") SetResolution failed, err=");
         Serial.println(status);
         // Nebereme jako fatální chybu
     }
 
     initialized = true;
-    Serial.println("# MLX90641 thermal sensor initialized successfully");
+    Serial.print("# MLX90641 (0x");
+    Serial.print(i2cAddr, HEX);
+    Serial.println(") thermal sensor initialized successfully");
     return true;
 }
 
@@ -78,7 +101,7 @@ bool MLX90641::readThermalData(float &vdd, float &ta, float corners[4], float &c
     }
 
     // Načte kompletní frame (včetně pomocných registrů). Funkce sama čeká na nový frame.
-    int status = MLX90641_GetFrameData(MLX90641_I2C_ADDR, frameData);
+    int status = MLX90641_GetFrameData(i2cAddr, frameData);
     if (status < 0)
     {
         Serial.print("# MLX90641_GetFrameData failed, err=");

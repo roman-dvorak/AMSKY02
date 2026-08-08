@@ -2,7 +2,9 @@
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include "AMS_TSL2591.h"
+#include "PCA9543.h"
 #include "MLX90641.h"
+#include "MLX90642.h"
 #include "version.h"
 #include "sqm_utils.h"
 #include "amsky01_utils.h"
@@ -14,7 +16,7 @@ extern "C" {
 }
 
 // Firmware and hardware version info
-#define DEVICE_NAME "AMSKY01A"
+#define DEVICE_NAME "AMSKY02B"
 #define FW_VERSION BUILD_VERSION
 
 // Pin definitions
@@ -26,11 +28,31 @@ extern "C" {
 // Initialize SHT45 sensor
 Adafruit_SHT4x sht4 = Adafruit_SHT4x();
 
-// Initialize AMS TSL2591 light sensor
-AMS_TSL2591 amsSensor;
+// I2C mux PCA9543A - kanál 0 a 1, na každém je optický senzor TSL2591
+// a (v příští fázi) MLX90642. Oba TSL2591 mají pevnou adresu 0x29,
+// proto musí být vždy vybraný jen jeden kanál při komunikaci.
+PCA9543 i2cMux;
+#define MUX_CHANNEL_COUNT 2
 
-// Initialize MLX90641 thermal sensor
-MLX90641 mlxSensor;
+// AMS TSL2591 light sensors - jeden na každém kanálu muxu
+AMS_TSL2591 amsSensor[MUX_CHANNEL_COUNT];
+bool tsl_available[MUX_CHANNEL_COUNT] = {false, false};
+
+// MLX90641 thermal sensors - stará HW revize (AMSKY01A), přímo na I2C1
+// bez muxu. Na AMSKY02B jsou nahrazeny MLX90642 za mux.
+#define ENABLE_MLX90641 0
+#if ENABLE_MLX90641
+MLX90641 mlxSensor1;  // Address 0x33
+MLX90641 mlxSensor2;  // Address 0x35
+#endif
+
+// MLX90642 thermal sensors - jeden na každém kanálu muxu, stejná adresa
+// 0x66 (default SA) jako TSL2591 sdílí adresu 0x29.
+#define ENABLE_MLX90642 1
+#if ENABLE_MLX90642
+MLX90642 mlxSensor[MUX_CHANNEL_COUNT];
+bool mlx_available[MUX_CHANNEL_COUNT] = {false, false};
+#endif
 
 // Initialize configuration manager
 ConfigManager configManager;
@@ -46,9 +68,10 @@ const float MY_PI = 3.14159265359;
 
 // Variables for sensors
 bool sht4_available = false;
-bool tsl_available = false;
 unsigned long last_measurement = 0;
-const unsigned long MEASUREMENT_INTERVAL = 2000; // 2 seconds
+const unsigned long MEASUREMENT_INTERVAL = 500; // 500 ms (2 Hz)
+unsigned long last_tsl_measurement = 0;
+const unsigned long TSL_MEASUREMENT_INTERVAL = 2000; // 2 s
 
 // Režim posílání celé IR mapy po UARTu
 bool thrmap_streaming = false;
@@ -63,7 +86,51 @@ static void enterUf2Bootloader() {
 
 static void processSerialCommand(const char *cmd)
 {
-  if (strcmp(cmd, "thrmap_on") == 0)
+  if (strcmp(cmd, "i2c_scan") == 0 || strcmp(cmd, "i2c_scan_slow") == 0)
+  {
+    bool slow = (strcmp(cmd, "i2c_scan_slow") == 0);
+    // PCA9543A podporuje max. 400 kHz - na 1 MHz (FM+) by neodpovídal.
+    // Pomalý sken (100 kHz + delay + výpis chybových kódů) pro diagnostiku.
+    Wire1.setClock(slow ? 100000 : 400000);
+
+    // Prohledá I2C1 bus (adresy muxu, senzorů viditelných bez přepnutí kanálu)
+    Serial.println("# I2C1 scan (bus root, mux not selected):");
+    for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+      Wire1.beginTransmission(addr);
+      uint8_t err = Wire1.endTransmission();
+      if (err == 0) {
+        Serial.print("#   found device at 0x");
+        if (addr < 0x10) Serial.print("0");
+        Serial.println(addr, HEX);
+      } else if (slow) {
+        Serial.print("#   0x"); if (addr < 0x10) Serial.print("0");
+        Serial.print(addr, HEX); Serial.print(" -> err "); Serial.println(err);
+      }
+      if (slow) delay(20);
+    }
+    for (uint8_t ch = 0; ch < MUX_CHANNEL_COUNT; ch++) {
+      i2cMux.selectChannel(ch);
+      if (slow) delay(5);
+      Serial.print("# I2C1 scan (mux channel "); Serial.print(ch); Serial.println("):");
+      for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+        Wire1.beginTransmission(addr);
+        uint8_t err = Wire1.endTransmission();
+        if (err == 0) {
+          Serial.print("#   found device at 0x");
+          if (addr < 0x10) Serial.print("0");
+          Serial.println(addr, HEX);
+        } else if (slow) {
+          Serial.print("#   0x"); if (addr < 0x10) Serial.print("0");
+          Serial.print(addr, HEX); Serial.print(" -> err "); Serial.println(err);
+        }
+        if (slow) delay(20);
+      }
+    }
+    i2cMux.disableAll();
+    Wire1.setClock(1000000); // zpět na 1 MHz
+    Serial.println("# scan done");
+  }
+  else if (strcmp(cmd, "thrmap_on") == 0)
   {
     thrmap_streaming = true;
     Serial.println("# thrmap streaming ON");
@@ -211,6 +278,7 @@ void setup() {
   Wire1.setSDA(SDA_PIN);
   Wire1.setSCL(SCL_PIN);
   Wire1.begin();
+  Wire1.setClock(1000000); // 1 MHz Fast Mode Plus
   delay(100);
   
   // Initialize SHT45 sensor on I2C1
@@ -226,20 +294,53 @@ void setup() {
     Serial.println("# SHT4x sensor initialization failed");
   }
   
-  // Initialize AMS TSL2591 light sensor on I2C1
-  if (amsSensor.begin(&Wire1)) {
-    tsl_available = true;
+  // Initialize I2C mux PCA9543A (max. 400 kHz dle datasheetu)
+  Wire1.setClock(400000);
+  if (i2cMux.begin(&Wire1)) {
+    Serial.println("# PCA9543A I2C mux initialized successfully");
   } else {
-    tsl_available = false;
+    Serial.println("# PCA9543A I2C mux initialization failed - check wiring/address");
   }
-  
-  // Initialize MLX90641 thermal sensor on I2C1
-  if (mlxSensor.begin(&Wire1)) {
-    // MLX sensor is available
+
+  // Initialize AMS TSL2591 light sensors - jeden na každém kanálu muxu
+  for (uint8_t ch = 0; ch < MUX_CHANNEL_COUNT; ch++) {
+    i2cMux.selectChannel(ch);
+    if (amsSensor[ch].begin(&Wire1)) {
+      tsl_available[ch] = true;
+      Serial.print("# TSL2591 channel "); Serial.print(ch); Serial.println(" initialized successfully");
+    } else {
+      tsl_available[ch] = false;
+      Serial.print("# TSL2591 channel "); Serial.print(ch); Serial.println(" initialization failed");
+    }
+
+#if ENABLE_MLX90642
+    if (mlxSensor[ch].begin(&Wire1)) {
+      mlx_available[ch] = true;
+      Serial.print("# MLX90642 channel "); Serial.print(ch); Serial.println(" initialized successfully");
+    } else {
+      mlx_available[ch] = false;
+      Serial.print("# MLX90642 channel "); Serial.print(ch); Serial.println(" initialization failed");
+    }
+#endif
+  }
+  i2cMux.disableAll();
+  Wire1.setClock(1000000); // zpět na 1 MHz
+
+#if ENABLE_MLX90641
+  // Initialize MLX90641 thermal sensors on I2C1
+  if (mlxSensor1.begin(&Wire1, 0x33)) {
+    // MLX sensor 1 is available
   } else {
-    // MLX sensor is not available
+    // MLX sensor 1 is not available
   }
-  
+
+  if (mlxSensor2.begin(&Wire1, 0x35)) {
+    // MLX sensor 2 is available
+  } else {
+    // MLX sensor 2 is not available
+  }
+#endif
+
   // Initialize configuration manager
   configManager.begin();
   configManager.printConfig();
@@ -267,8 +368,16 @@ void loop() {
     last_trigger_blink = current_time;
   }
   
-// Read sensor data every 2 seconds
-  if ((sht4_available || tsl_available || mlxSensor.isAvailable()) && (current_time - last_measurement >= MEASUREMENT_INTERVAL)) {
+// Read sensor data at 2 Hz (500 ms)
+  bool any_tsl_available = tsl_available[0] || tsl_available[1];
+#if ENABLE_MLX90641
+  bool any_mlx_available = mlxSensor1.isAvailable() || mlxSensor2.isAvailable();
+#elif ENABLE_MLX90642
+  bool any_mlx_available = mlx_available[0] || mlx_available[1];
+#else
+  bool any_mlx_available = false;
+#endif
+  if ((sht4_available || any_tsl_available || any_mlx_available) && (current_time - last_measurement >= MEASUREMENT_INTERVAL)) {
     if (sht4_available) {
       sensors_event_t humidity, temp;
       
@@ -297,69 +406,95 @@ void loop() {
       }
     }
     
-    if (tsl_available && amsSensor.isAvailable()) {
-      uint32_t ulux;
-      uint16_t full_raw, ir_raw;
-      const char* gain_str;
-      const char* integration_time_str;
-      
-      if (amsSensor.readLightData(ulux, full_raw, ir_raw, gain_str, integration_time_str)) {
-        // Calculate SQM using new TSL2591 algorithm from raw sensor data
-        float gain_value = amsSensor.getGainValueCurrent();
-        float integration_ms = amsSensor.getIntegrationTimeMsCurrent();
-        
-        SQMResult sqm_result = calculate_sqm_from_raw(
-            ir_raw,
-            full_raw,
-            gain_value,
-            integration_ms,
-            1,
-            configManager.getSqmOffsetBase(),
-            configManager.getSqmMagnitudeConst(),
-            0.0
-        );
-        
-        double sqm_value;
-        if (sqm_result.valid) {
-            sqm_value = (double)sqm_result.mpsas;
-        } else {
-            double lux_double = (double)ulux / 1000000.0;
-            sqm_value = convert_lux_to_sqm(lux_double);
-        }
+    if (any_tsl_available && (current_time - last_tsl_measurement >= TSL_MEASUREMENT_INTERVAL)) {
+      Wire1.setClock(400000); // TSL2591 max. 400 kHz
+      bool settings_adjusted = false;
 
-        Serial.print("$light,");
-        Serial.print(ulux);  // Lux value in microlux value with 2 decimal places
-        Serial.print(",");
-        Serial.print(full_raw);    // Raw full spectrum value
-        Serial.print(",");
-        Serial.print(ir_raw);      // Raw IR value
-        Serial.print(",");
-        Serial.print(gain_str); // Current gain setting
-        Serial.print(",");
-        Serial.print(integration_time_str); // Current integration time setting
-        Serial.print(",");
-        Serial.print(sqm_value, 2); // SQM value in mag/arcsec2 with 2 decimal places
-        Serial.println();
-      } else {
-        // Settings were adjusted, skip this measurement
+      for (uint8_t ch = 0; ch < MUX_CHANNEL_COUNT; ch++) {
+        if (!tsl_available[ch] || !amsSensor[ch].isAvailable()) continue;
+
+        i2cMux.selectChannel(ch);
+
+        uint32_t ulux;
+        uint16_t full_raw, ir_raw;
+        const char* gain_str;
+        const char* integration_time_str;
+
+        if (amsSensor[ch].readLightData(ulux, full_raw, ir_raw, gain_str, integration_time_str)) {
+          // Calculate SQM using new TSL2591 algorithm from raw sensor data
+          float gain_value = amsSensor[ch].getGainValueCurrent();
+          float integration_ms = amsSensor[ch].getIntegrationTimeMsCurrent();
+
+          SQMResult sqm_result = calculate_sqm_from_raw(
+              ir_raw,
+              full_raw,
+              gain_value,
+              integration_ms,
+              1,
+              configManager.getSqmOffsetBase(),
+              configManager.getSqmMagnitudeConst(),
+              0.0
+          );
+
+          double sqm_value;
+          if (sqm_result.valid) {
+              sqm_value = (double)sqm_result.mpsas;
+          } else {
+              double lux_double = (double)ulux / 1000000.0;
+              sqm_value = convert_lux_to_sqm(lux_double);
+          }
+
+          Serial.print("$light,");
+          Serial.print(ch);          // Kanál muxu (0 nebo 1)
+          Serial.print(",");
+          Serial.print(ulux);  // Lux value in microlux value with 2 decimal places
+          Serial.print(",");
+          Serial.print(full_raw);    // Raw full spectrum value
+          Serial.print(",");
+          Serial.print(ir_raw);      // Raw IR value
+          Serial.print(",");
+          Serial.print(gain_str); // Current gain setting
+          Serial.print(",");
+          Serial.print(integration_time_str); // Current integration time setting
+          Serial.print(",");
+          Serial.print(sqm_value, 2); // SQM value in mag/arcsec2 with 2 decimal places
+          Serial.println();
+        } else {
+          // Settings were adjusted, skip this measurement for this channel
+          settings_adjusted = true;
+        }
+      }
+
+      i2cMux.disableAll();
+      Wire1.setClock(1000000); // zpět na 1 MHz
+      last_tsl_measurement = current_time;
+
+      if (settings_adjusted) {
         last_measurement = current_time;
         return;
       }
     }
-    if (mlxSensor.isAvailable()) {
+
+#if ENABLE_MLX90642
+    // MLX90642 - jeden na každém kanálu muxu (FM+, až 1 MHz dle datasheetu)
+    for (uint8_t ch = 0; ch < MUX_CHANNEL_COUNT; ch++) {
+      if (!mlx_available[ch] || !mlxSensor[ch].isAvailable()) continue;
+
+      i2cMux.selectChannel(ch);
+
       float vdd, ta, center;
       float corners[4];
-      
-      if (mlxSensor.readThermalData(vdd, ta, corners, center)) {
-        // Output parameters
-        Serial.print("$cloud_meta,");
+
+      if (mlxSensor[ch].readThermalData(vdd, ta, corners, center)) {
+        uint8_t msg_ch = ch + 1; // zachování číslování zpráv 1/2 jako u staré HW revize
+
+        Serial.print("$cloud_meta,"); Serial.print(msg_ch); Serial.print(",");
         Serial.print(vdd, 3);
         Serial.print(",");
         Serial.print(ta, 3);
         Serial.println();
-        
-        // Output corner and center data
-        Serial.print("$cloud,");
+
+        Serial.print("$cloud,"); Serial.print(msg_ch); Serial.print(",");
         Serial.print(corners[0], 2); Serial.print(","); // TL
         Serial.print(corners[1], 2); Serial.print(","); // TR
         Serial.print(corners[2], 2); Serial.print(","); // BL
@@ -367,13 +502,12 @@ void loop() {
         Serial.print(center, 2);                         // CTR
         Serial.println();
 
-        // Volitelné: celá teplotní mapa (16x12 = 192 hodnot) v °C
         if (thrmap_streaming) {
-          const float *map = mlxSensor.getTemperatureMap();
+          const float *map = mlxSensor[ch].getTemperatureMap();
           if (map != nullptr) {
-            Serial.print("$thrmap");
-            for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
-              Serial.print(i == 0 ? "," : ",");
+            Serial.print("$thrmap,"); Serial.print(msg_ch);
+            for (int i = 0; i < MLX90642_PIXEL_COUNT; ++i) {
+              Serial.print(",");
               Serial.print(map[i], 2);
             }
             Serial.println();
@@ -381,6 +515,84 @@ void loop() {
         }
       }
     }
+    i2cMux.disableAll();
+#endif
+
+#if ENABLE_MLX90641
+    // Čtení prvního MLX senzoru (0x33)
+    if (mlxSensor1.isAvailable()) {
+      float vdd, ta, center;
+      float corners[4];
+      
+      if (mlxSensor1.readThermalData(vdd, ta, corners, center)) {
+        // Output parameters
+        Serial.print("$cloud_meta,1,");
+        Serial.print(vdd, 3);
+        Serial.print(",");
+        Serial.print(ta, 3);
+        Serial.println();
+        
+        // Output corner and center data
+        Serial.print("$cloud,1,");
+        Serial.print(corners[0], 2); Serial.print(","); // TL
+        Serial.print(corners[1], 2); Serial.print(","); // TR
+        Serial.print(corners[2], 2); Serial.print(","); // BL
+        Serial.print(corners[3], 2); Serial.print(","); // BR
+        Serial.print(center, 2);                         // CTR
+        Serial.println();
+
+        // Volné: celá teplotní mapa (16x12 = 192 hodnot) v °C
+        if (thrmap_streaming) {
+          const float *map = mlxSensor1.getTemperatureMap();
+          if (map != nullptr) {
+            Serial.print("$thrmap,1");
+            for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
+              Serial.print(",");
+              Serial.print(map[i], 2);
+            }
+            Serial.println();
+          }
+        }
+      }
+    }
+    
+    // Čtení druhého MLX senzoru (0x35)
+    if (mlxSensor2.isAvailable()) {
+      float vdd, ta, center;
+      float corners[4];
+      
+      if (mlxSensor2.readThermalData(vdd, ta, corners, center)) {
+        // Output parameters
+        Serial.print("$cloud_meta,2,");
+        Serial.print(vdd, 3);
+        Serial.print(",");
+        Serial.print(ta, 3);
+        Serial.println();
+        
+        // Output corner and center data
+        Serial.print("$cloud,2,");
+        Serial.print(corners[0], 2); Serial.print(","); // TL
+        Serial.print(corners[1], 2); Serial.print(","); // TR
+        Serial.print(corners[2], 2); Serial.print(","); // BL
+        Serial.print(corners[3], 2); Serial.print(","); // BR
+        Serial.print(center, 2);                         // CTR
+        Serial.println();
+
+        // Volné: celá teplotní mapa (16x12 = 192 hodnot) v °C
+        if (thrmap_streaming) {
+          const float *map = mlxSensor2.getTemperatureMap();
+          if (map != nullptr) {
+            Serial.print("$thrmap,2");
+            for (int i = 0; i < MLX90641_PIXEL_COUNT; ++i) {
+              Serial.print(",");
+              Serial.print(map[i], 2);
+            }
+            Serial.println();
+          }
+        }
+      }
+    }
+#endif
 
     last_measurement = current_time;
   }

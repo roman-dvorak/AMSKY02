@@ -7,12 +7,13 @@
 #include "mlx90641-library/headers/MLX90641_API.h"
 
 // MLX90641 definitions
-#define MLX90641_I2C_ADDR 0x33
+#define MLX90641_I2C_ADDR_DEFAULT 0x33
 #define MLX90641_PIXEL_COUNT 192
 
 class MLX90641 {
 private:
     TwoWire* _wire;
+    uint8_t i2cAddr;
     bool initialized;
     bool hasValidFrame;
 
@@ -30,7 +31,7 @@ public:
     MLX90641();
 
     // Inicializace senzoru a načtení kalibračních dat
-    bool begin(TwoWire *wire = &Wire);
+    bool begin(TwoWire *wire = &Wire, uint8_t addr = MLX90641_I2C_ADDR_DEFAULT);
 
     // Dostupnost senzoru (úspěšná inicializace)
     bool isAvailable() const;

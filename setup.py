@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Setup script for AMSKY01 package."""
+"""Setup script for AMSKY02 package."""
 
 from setuptools import setup
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh
-Usage: python plot_logs.py [options] [log_file1.csv] [log_file2.csv] ...
-       python plot_logs.py --interactive --refresh 30 --output myplot.png sensor_logs/latest.csv
+Usage: amsky02-plot [options] [log_file1.csv] [log_file2.csv] ...
+       amsky02-plot --interactive --refresh 30 --output myplot.png sensor_logs/latest.csv
 
 Options:
   --interactive, -i     Show plot in interactive window
   --refresh, -r SECS    Auto-refresh interval in seconds (requires --interactive)
-  --output, -o FILE     Output filename (default: amsky01_plots.png)
+  --output, -o FILE     Output filename (default: amsky02_plots.png)
   --help, -h            Show this help
 """
 
@@ -339,7 +339,7 @@ def plot_amsky_data(csv_files):
         output_file = csv_files[0].replace('.csv', '_plots.png')
     else:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        output_file = f'amsky01_combined_{timestamp}_plots.png'
+        output_file = f'amsky02_combined_{timestamp}_plots.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Plot saved as: {output_file}")
     
@@ -373,7 +373,7 @@ def plot_amsky_data(csv_files):
     if not light_improved_data.empty:
         print(f"Light (improved): {light_improved_data.min():.6f} to {light_improved_data.max():.6f} units")
 
-def plot_amsky_data_enhanced(csv_files, output_file="amsky01_plots.png", interactive=False, refresh_interval=None):
+def plot_amsky_data_enhanced(csv_files, output_file="amsky02_plots.png", interactive=False, refresh_interval=None):
     """Enhanced plotting function with interactive display and auto-refresh"""
     
     def create_plot():
@@ -623,10 +623,10 @@ def main():
         description='AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python plot_logs.py data.csv                                    # Basic plot
-  python plot_logs.py --interactive data.csv                      # Interactive plot
-  python plot_logs.py -i -r 30 -o myplot.png data.csv            # Interactive with refresh
-  python plot_logs.py --output custom_name.png file1.csv file2.csv # Custom output name
+  amsky02-plot data.csv                                    # Basic plot
+  amsky02-plot --interactive data.csv                      # Interactive plot
+  amsky02-plot -i -r 30 -o myplot.png data.csv            # Interactive with refresh
+  amsky02-plot --output custom_name.png file1.csv file2.csv # Custom output name
         """
     )
     
@@ -636,8 +636,8 @@ def main():
                        help='Show plot in interactive window')
     parser.add_argument('-r', '--refresh', type=int, metavar='SECS',
                        help='Auto-refresh interval in seconds (requires --interactive)')
-    parser.add_argument('-o', '--output', default='amsky01_plots.png',
-                       help='Output filename (default: amsky01_plots.png)')
+    parser.add_argument('-o', '--output', default='amsky02_plots.png',
+                       help='Output filename (default: amsky02_plots.png)')
     
     # Handle case where no arguments are provided
     if len(sys.argv) == 1:
