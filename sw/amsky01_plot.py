@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh
-Usage: python plot_logs.py [options] [log_file1.csv] [log_file2.csv] ...
-       python plot_logs.py --interactive --refresh 30 --output myplot.png sensor_logs/latest.csv
+Usage: amsky01-plot [options] [log_file1.csv] [log_file2.csv] ...
+       amsky01-plot --interactive --refresh 30 --output myplot.png sensor_logs/latest.csv
 
 Options:
   --interactive, -i     Show plot in interactive window
@@ -623,10 +623,10 @@ def main():
         description='AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
-  python plot_logs.py data.csv                                    # Basic plot
-  python plot_logs.py --interactive data.csv                      # Interactive plot
-  python plot_logs.py -i -r 30 -o myplot.png data.csv            # Interactive with refresh
-  python plot_logs.py --output custom_name.png file1.csv file2.csv # Custom output name
+  amsky01-plot data.csv                                    # Basic plot
+  amsky01-plot --interactive data.csv                      # Interactive plot
+  amsky01-plot -i -r 30 -o myplot.png data.csv            # Interactive with refresh
+  amsky01-plot --output custom_name.png file1.csv file2.csv # Custom output name
         """
     )
     

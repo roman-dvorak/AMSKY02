@@ -33,9 +33,10 @@ jobs:
           base = m.group(1)
           # strip any existing suffix
           base = re.sub(r"(\.dev.*|\+.*)$", "", base)
-          ts = datetime.datetime.utcnow().strftime('%Y%m%d%H%M')
-          sha = os.getenv('GITHUB_SHA', '')[:7]
-          new = f"{base}.dev{ts}+g{sha}" if sha else f"{base}.dev{ts}"
+          ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M')
+          # NOTE: PyPI rejects PEP 440 local version segments ("+gabc1234"),
+          # so the commit sha must not be appended here.
+          new = f"{base}.dev{ts}"
           s2 = re.sub(r"__version__\s*=\s*\"[^\"]+\"", f"__version__ = \"{new}\"", s)
           p.write_text(s2)
           print('Set dev version:', new)
@@ -62,8 +63,14 @@ jobs:
     name: Upload to PyPI
     needs: build
     runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/amsky01
+
     permissions:
-      contents: read
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -71,8 +78,7 @@ jobs:
           name: python-dev-distributions
           path: dist/
 
-      - name: Publish to PyPI (token)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true

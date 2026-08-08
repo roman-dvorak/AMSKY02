@@ -36,7 +36,7 @@ python amsky01_cli.py --port /dev/ttyACM0 --baud 115200
 
 ## Log Analysis Tools
 
-### `plot_logs.py`
+### `amsky01_plot.py`
 Plot graphs from saved CSV logs:
 - Support for multiple files simultaneously
 - Interactive mode with auto-refresh
@@ -44,9 +44,9 @@ Plot graphs from saved CSV logs:
 
 **Usage:**
 ```bash
-python plot_logs.py sensor_logs/latest.csv
-python plot_logs.py --interactive --refresh 30 sensor_logs/*.csv
-python plot_logs.py --output myplot.png sensor_logs/data.csv
+amsky01-plot sensor_logs/latest.csv
+amsky01-plot --interactive --refresh 30 sensor_logs/*.csv
+amsky01-plot --output myplot.png sensor_logs/data.csv
 ```
 
 **Dependencies:** `pandas`, `matplotlib`, `numpy`

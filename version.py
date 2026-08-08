@@ -3,7 +3,7 @@
 Version management for AMSKY01 package
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 def get_version():
     """Get the current version"""
