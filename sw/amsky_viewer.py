@@ -1,4 +1,4 @@
-"""Melexis AMSKY01 viewer from serial data or HDF5 log replay
+"""Melexis AMSKY viewer from serial data or HDF5 log replay
 
 Shows:
 - IR mapu z MLX90641 ($thrmap)
@@ -12,7 +12,7 @@ Závislosti:
 
 Spuštění (příklad):
     python amsky_viewer.py --port /dev/ttyACM0 --baud 115200
-    python amsky_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY01
+    python amsky_viewer.py --port /dev/ttyACM0 --baud 115200 --log --log-name AMSKY02
     python amsky_viewer.py --replay AMSKY01_20260502_18.h5
     python amsky_viewer.py --replay AMSKY01_20260502_18.h5 --replay-speed 5
     python amsky_viewer.py --port /dev/ttyACM0 --headless --log --verbose
@@ -727,7 +727,7 @@ class HeadlessRunner:
     do HDF5 (pokud zapnuto) a volitelně vypisuje hodnoty na stdout.
     """
 
-    def __init__(self, ser, device_id="AMSKY01", log_path=".",
+    def __init__(self, ser, device_id="AMSKY02", log_path=".",
                  enable_logging=True, verbose=False, sqm_zp=24.0,
                  stats_interval=10.0):
         self.ser = ser
@@ -909,7 +909,7 @@ class ConfigDialog(QtWidgets.QDialog):
         
         # Log name
         self.log_name_edit = QtWidgets.QLineEdit()
-        self.log_name_edit.setText(settings.value("log_name", "AMSKY01"))
+        self.log_name_edit.setText(settings.value("log_name", "AMSKY02"))
         layout.addRow("Log Name:", self.log_name_edit)
         
         # Buttons
@@ -934,7 +934,7 @@ class ConfigDialog(QtWidgets.QDialog):
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, ser=None, vmin=None, vmax=None, rotation=0.0, debug=False,
-                 enable_logging=False, enable_http_api=False, device_id="AMSKY01", log_path=None, sqm_zp=24.0,
+                 enable_logging=False, enable_http_api=False, device_id="AMSKY02", log_path=None, sqm_zp=24.0,
                  replay_file=None, replay_speed=1.0, parent=None):
         super().__init__(parent)
         self.ser = ser
@@ -960,7 +960,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # HDF5 logování
         self.logging_enabled = enable_logging and HDF5_AVAILABLE
-        self.device_id = device_id or self.settings.value("log_name", "AMSKY01")
+        self.device_id = device_id or self.settings.value("log_name", "AMSKY02")
         self.logger = None
         
         if self.logging_enabled:
@@ -1004,7 +1004,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.http_enabled = False
         self.enable_http_api_on_start = enable_http_api
 
-        self.setWindowTitle("AMSKY01 viewer")
+        self.setWindowTitle("AMSKY viewer")
         
         # --- Menu bar ---
         menubar = self.menuBar()
@@ -1377,7 +1377,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog = ConfigDialog(self.settings, self)
         if dialog.exec():
             # Aplikuj změny
-            self.device_id = self.settings.value("log_name", "AMSKY01")
+            self.device_id = self.settings.value("log_name", "AMSKY02")
             if self.logger:
                 # Pokud je logování zapnuté, restartuj s novým nastavením
                 self.logger.close()
@@ -1845,7 +1845,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if n > 0:
                 self._display_replay_frame(0)
 
-            self.setWindowTitle(f"AMSKY01 Replay — {os.path.basename(filepath)}")
+            self.setWindowTitle(f"AMSKY Replay — {os.path.basename(filepath)}")
             self.statusBar().showMessage(f"Replay: {os.path.basename(filepath)}  ({n} snímků)")
 
         except Exception as e:
@@ -2015,7 +2015,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Melexis AMSKY01 vizualizátor (PyQtGraph)")
+    parser = argparse.ArgumentParser(description="Melexis AMSKY vizualizátor (PyQtGraph)")
     parser.add_argument("--port", default=None, help="seriový port, např. /dev/ttyACM0")
     parser.add_argument("--baud", type=int, default=115200, help="baudrate (default 115200)")
     parser.add_argument("--replay", type=str, default=None, metavar="FILE",
@@ -2056,7 +2056,7 @@ def main():
         except serial.SerialException:
             pass
 
-        device_id = args.log_name or "AMSKY01"
+        device_id = args.log_name or "AMSKY02"
         log_path = args.log_path or "."
         runner = HeadlessRunner(
             ser,

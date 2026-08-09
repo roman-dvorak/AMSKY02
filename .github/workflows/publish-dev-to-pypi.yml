@@ -1,12 +1,29 @@
-name: Publish dev build to PyPI (manual)
+name: Publish dev build to PyPI
 
+# Každý push do main vydá dev release (napr. 1.0.0.dev202608091530).
+# Tag pushe sem nespadají — ty řeší publish-to-pypi.yml, protože
+# "branches:" filtr se na refs/tags/* nevztahuje.
 on:
+  push:
+    branches:
+      - main
+    # Jen cesty, které se do balíčku nepromítnou. README_PyPI.md tu
+    # schválně není — je to long_description, tedy součást metadat.
+    paths-ignore:
+      - 'doc/**'
+      - 'hw/**'
+      - 'fw/**'
   workflow_dispatch:
     inputs:
       reason:
         description: "Reason for manual dev publish"
         required: false
         default: "manual"
+
+# Když přijde víc pushů rychle po sobě, doběhne jen ten poslední.
+concurrency:
+  group: publish-dev-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:

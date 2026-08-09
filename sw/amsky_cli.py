@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMSKY01 Sensor Data Viewer
+AMSKY Sensor Data Viewer
 Real-time visualization of sensor data with CLI interface
 """
 
@@ -722,7 +722,7 @@ class CLIInterface:
         height, width = self.stdscr.getmaxyx()
         
         # Title
-        title = "AMSKY01 Sensor Data Viewer"
+        title = "AMSKY Sensor Data Viewer"
         self.stdscr.addstr(0, (width - len(title)) // 2, title, curses.color_pair(4) | curses.A_BOLD)
         
         # Instructions
@@ -1054,7 +1054,7 @@ def list_serial_ports():
 
 def main():
     """Application entry point"""
-    parser = argparse.ArgumentParser(description='AMSKY01 Sensor Data Viewer')
+    parser = argparse.ArgumentParser(description='AMSKY Sensor Data Viewer')
     parser.add_argument('--port', '-p', default='/dev/ttyACM0', 
                         help='Serial port (default: /dev/ttyACM0)')
     parser.add_argument('--baudrate', '-b', type=int, default=115200,

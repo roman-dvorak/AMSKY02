@@ -37,11 +37,20 @@ To purchase AMSKY02 or for more information, contact us at **info@astrometers.eu
 
 ## Python Host Software
 
-The `sw/` directory contains the host-side tools, also published on PyPI:
+The `sw/` directory contains the host-side tools, also published on PyPI as
+[`amsky`](https://pypi.org/project/amsky/). Install into a virtual environment — on
+Debian/Ubuntu/Raspberry Pi OS this is required, because those mark the system Python
+as externally managed:
 
 ```bash
+sudo apt install python3-venv          # Debian/Ubuntu/Raspberry Pi OS
+python3 -m venv ~/amsky-venv
+source ~/amsky-venv/bin/activate
 pip install amsky
 ```
+
+Development builds go out from every push to `main` as `X.Y.Z.devYYYYMMDDHHMM`;
+install them with `pip install --pre --upgrade amsky`.
 
 | Command | Purpose |
 | --- | --- |

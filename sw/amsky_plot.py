@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh
+AMSKY Data Log Viewer - Interactive plotting with auto-refresh
 Usage: amsky-plot [options] [log_file1.csv] [log_file2.csv] ...
        amsky-plot --interactive --refresh 30 --output myplot.png sensor_logs/latest.csv
 
@@ -169,7 +169,7 @@ class LogDataManager:
 
 
 def plot_amsky_data(csv_files):
-    """Plot AMSKY01 sensor data in 3 subplots for multiple files"""
+    """Plot AMSKY sensor data in 3 subplots for multiple files"""
     
     dfs = []
     for csv_file in csv_files:
@@ -211,9 +211,9 @@ def plot_amsky_data(csv_files):
     # Create figure with 5 subplots
     fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(12, 15), sharex=True)
     if len(csv_files) == 1:
-        fig.suptitle(f'AMSKY01 Sensor Data - {Path(csv_files[0]).name}', fontsize=14)
+        fig.suptitle(f'AMSKY Sensor Data - {Path(csv_files[0]).name}', fontsize=14)
     else:
-        fig.suptitle(f'AMSKY01 Sensor Data - {len(csv_files)} files combined', fontsize=14)
+        fig.suptitle(f'AMSKY Sensor Data - {len(csv_files)} files combined', fontsize=14)
     
     # Plot 1: Temperature, Humidity and Dew Point
     ax1_twin = ax1.twinx()
@@ -425,14 +425,14 @@ def plot_amsky_data_enhanced(csv_files, output_file="amsky_plots.png", interacti
         if interactive:
             current_time = datetime.now().strftime('%H:%M:%S')
             if len(csv_files) == 1:
-                fig.suptitle(f'AMSKY01 Sensor Data - {Path(csv_files[0]).name} (Updated: {current_time})', fontsize=14)
+                fig.suptitle(f'AMSKY Sensor Data - {Path(csv_files[0]).name} (Updated: {current_time})', fontsize=14)
             else:
-                fig.suptitle(f'AMSKY01 Sensor Data - {len(csv_files)} files combined (Updated: {current_time})', fontsize=14)
+                fig.suptitle(f'AMSKY Sensor Data - {len(csv_files)} files combined (Updated: {current_time})', fontsize=14)
         else:
             if len(csv_files) == 1:
-                fig.suptitle(f'AMSKY01 Sensor Data - {Path(csv_files[0]).name}', fontsize=14)
+                fig.suptitle(f'AMSKY Sensor Data - {Path(csv_files[0]).name}', fontsize=14)
             else:
-                fig.suptitle(f'AMSKY01 Sensor Data - {len(csv_files)} files combined', fontsize=14)
+                fig.suptitle(f'AMSKY Sensor Data - {len(csv_files)} files combined', fontsize=14)
         
         # Plot 1: Temperature, Humidity and Dew Point
         ax1_twin = ax1.twinx()
@@ -620,7 +620,7 @@ def plot_amsky_data_enhanced(csv_files, output_file="amsky_plots.png", interacti
 def main():
     """Main entry point with argument parsing"""
     parser = argparse.ArgumentParser(
-        description='AMSKY01 Data Log Viewer - Interactive plotting with auto-refresh',
+        description='AMSKY Data Log Viewer - Interactive plotting with auto-refresh',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   amsky-plot data.csv                                    # Basic plot

@@ -31,15 +31,77 @@ HDF5 or CSV.
 
 ## Installation
 
+### Recommended: into a virtual environment
+
+A virtual environment keeps the fairly heavy dependency set (PySide6 alone is a few
+hundred MB) out of your system Python. On Debian/Ubuntu and Raspberry Pi OS this is
+also the only way that works without `--break-system-packages`, because those systems
+mark the system Python as externally managed (PEP 668).
+
+```bash
+# Debian/Ubuntu/Raspberry Pi OS: the venv module is a separate package
+sudo apt install python3-venv
+
+python3 -m venv ~/amsky-venv
+source ~/amsky-venv/bin/activate
+pip install --upgrade pip
+pip install amsky
+```
+
+The commands are then on your `PATH` for as long as the environment is active:
+
+```bash
+amsky-viewer --port /dev/ttyACM0
+deactivate                          # leave the environment
+```
+
+To run without activating — handy in cron, systemd units or scripts — call the
+executable directly:
+
+```bash
+~/amsky-venv/bin/amsky-viewer --port /dev/ttyACM0 --headless --log
+```
+
+Upgrading later:
+
+```bash
+~/amsky-venv/bin/pip install --upgrade amsky
+```
+
+To remove everything, delete the directory: `rm -rf ~/amsky-venv`.
+
+### Alternative: pipx
+
+If you only want the command-line tools and never plan to import the modules, `pipx`
+manages the virtual environment for you:
+
+```bash
+pipx install amsky
+```
+
+### Plain pip
+
 ```bash
 pip install amsky
 ```
 
-This pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and psutil.
+Works on systems whose Python is not externally managed, and inside an already active
+virtual environment.
 
-If you only need headless logging on a small machine (e.g. a Raspberry Pi in an
-observatory), install into a virtual environment — the Qt dependency is large, but the
-viewer runs fine with `--headless` and no display attached.
+### Dependencies
+
+Installing pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and
+psutil. The Qt dependency is large, but the viewer runs fine with `--headless` and no
+display attached — useful on a small machine such as a Raspberry Pi in an observatory.
+
+### Development builds
+
+Every push to `main` publishes a pre-release versioned `X.Y.Z.devYYYYMMDDHHMM`. Regular
+installs never pick these up; ask for them explicitly:
+
+```bash
+pip install --pre --upgrade amsky
+```
 
 ### Serial port permissions (Linux)
 
