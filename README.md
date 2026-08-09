@@ -35,24 +35,36 @@ With both USB (CDC serial) and RS485 interfaces, AMSKY02 integrates easily into 
 
 To purchase AMSKY02 or for more information, contact us at **info@astrometers.eu**
 
-## Python Host Software
+## Python Control Software
 
 The `sw/` directory contains the host-side tools, also published on PyPI as
 [`amsky`](https://pypi.org/project/amsky/). Set up a working directory with its own
 virtual environment — the tools write their logs into the directory you run them from,
 and on Debian/Ubuntu/Raspberry Pi OS a virtual environment is required anyway, because
-those mark the system Python as externally managed:
+those mark the system Python as externally managed.
+
+### Installation via PIP
 
 ```bash
-mkdir -p ~/amsky && cd ~/amsky
+mkdir -p ~/amsky && cd ~/amsky         # Switch to your working directory
 sudo apt install python3-venv          # Debian/Ubuntu/Raspberry Pi OS
-python3 -m venv venv
-source venv/bin/activate
+```
+
+```bash
+python3 -m venv venv                   # Prepare new venv environment
+source venv/bin/activate               # activate venv
 pip install amsky                      # stable
 ```
 
-Back in later: `cd ~/amsky && source venv/bin/activate`. Out again: `deactivate`.
+### Running AMSKY software installed via PIP
+```bash
+cd ~/amsky
+source venv/bin/activate
+amsky-viewer --help                   # to show all options
+amsky-viewer --port /dev/ttyACM0      # To connect to sensor 
+```
 
+Possible options and updates
 ```bash
 pip install --pre --upgrade amsky      # newest development build instead
 pip install --upgrade amsky            # update to newest stable
