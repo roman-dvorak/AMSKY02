@@ -38,19 +38,30 @@ To purchase AMSKY02 or for more information, contact us at **info@astrometers.eu
 ## Python Host Software
 
 The `sw/` directory contains the host-side tools, also published on PyPI as
-[`amsky`](https://pypi.org/project/amsky/). Install into a virtual environment — on
-Debian/Ubuntu/Raspberry Pi OS this is required, because those mark the system Python
-as externally managed:
+[`amsky`](https://pypi.org/project/amsky/). Set up a working directory with its own
+virtual environment — the tools write their logs into the directory you run them from,
+and on Debian/Ubuntu/Raspberry Pi OS a virtual environment is required anyway, because
+those mark the system Python as externally managed:
 
 ```bash
+mkdir -p ~/amsky && cd ~/amsky
 sudo apt install python3-venv          # Debian/Ubuntu/Raspberry Pi OS
-python3 -m venv ~/amsky-venv
-source ~/amsky-venv/bin/activate
-pip install amsky
+python3 -m venv venv
+source venv/bin/activate
+pip install amsky                      # stable
 ```
 
-Development builds go out from every push to `main`, versioned against the next release (`1.0.1.devYYYYMMDDHHMM` while 1.0.0 is current);
-install them with `pip install --pre --upgrade amsky`.
+Back in later: `cd ~/amsky && source venv/bin/activate`. Out again: `deactivate`.
+
+```bash
+pip install --pre --upgrade amsky      # newest development build instead
+pip install --upgrade amsky            # update to newest stable
+pip install --pre --upgrade amsky      # update to newest development build
+pip install --force-reinstall amsky    # go back from a dev build to stable
+```
+
+Development builds go out from every push to `main`, versioned against the next
+release — `1.0.1.devYYYYMMDDHHMM` while 1.0.0 is current.
 
 | Command | Purpose |
 | --- | --- |

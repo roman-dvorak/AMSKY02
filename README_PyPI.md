@@ -31,80 +31,86 @@ HDF5 or CSV.
 
 ## Installation
 
-### Recommended: into a virtual environment
+The recommended setup is a working directory with its own virtual environment inside
+it. The virtual environment keeps the fairly heavy dependency set (PySide6 alone is a
+few hundred MB) out of your system Python. On Debian, Ubuntu and Raspberry Pi OS it is
+also the only thing that works without `--break-system-packages`, because those mark
+the system Python as externally managed (PEP 668).
 
-A virtual environment keeps the fairly heavy dependency set (PySide6 alone is a few
-hundred MB) out of your system Python. On Debian/Ubuntu and Raspberry Pi OS this is
-also the only way that works without `--break-system-packages`, because those systems
-mark the system Python as externally managed (PEP 668).
+### 1. Create a working directory
+
+The tools write into the directory you run them from — `amsky-viewer --log` puts HDF5
+files in the current directory, and `amsky-cli --log` creates `sensor_logs/YYYY/MM/DD/`
+there. So pick a directory for the data and stay in it. `~/amsky` is a reasonable
+default:
 
 ```bash
-# Debian/Ubuntu/Raspberry Pi OS: the venv module is a separate package
-sudo apt install python3-venv
+mkdir -p ~/amsky
+cd ~/amsky
+```
 
-python3 -m venv ~/amsky-venv
-source ~/amsky-venv/bin/activate
+### 2. Create and activate the virtual environment
+
+```bash
+sudo apt install python3-venv        # Debian/Ubuntu/Raspberry Pi OS only
+python3 -m venv venv
+source venv/bin/activate
 pip install --upgrade pip
-pip install amsky
 ```
 
-The commands are then on your `PATH` for as long as the environment is active:
+Your prompt now starts with `(venv)`. That is the sign the environment is active — the
+`amsky-*` commands only exist while it is.
+
+Later, in a new terminal, you get back in with:
 
 ```bash
-amsky-viewer --port /dev/ttyACM0
-deactivate                          # leave the environment
+cd ~/amsky
+source venv/bin/activate
 ```
 
-To run without activating — handy in cron, systemd units or scripts — call the
-executable directly:
+and you leave it with `deactivate`.
 
-```bash
-~/amsky-venv/bin/amsky-viewer --port /dev/ttyACM0 --headless --log
-```
+### 3. Install
 
-Upgrading later:
-
-```bash
-~/amsky-venv/bin/pip install --upgrade amsky
-```
-
-To remove everything, delete the directory: `rm -rf ~/amsky-venv`.
-
-### Alternative: pipx
-
-If you only want the command-line tools and never plan to import the modules, `pipx`
-manages the virtual environment for you:
-
-```bash
-pipx install amsky
-```
-
-### Plain pip
+**Stable release** — this is what you want unless you have a reason otherwise:
 
 ```bash
 pip install amsky
 ```
 
-Works on systems whose Python is not externally managed, and inside an already active
-virtual environment.
-
-### Dependencies
-
-Installing pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and
-psutil. The Qt dependency is large, but the viewer runs fine with `--headless` and no
-display attached — useful on a small machine such as a Raspberry Pi in an observatory.
-
-### Development builds
-
-Every push to `main` publishes a pre-release. These are versioned against the *next*
-release, not the current one — after 1.0.0 is out, dev builds are `1.0.1.devYYYYMMDDHHMM`.
-That ordering matters: under PEP 440 a `1.0.0.devN` would sort *before* the released
-1.0.0, so pip would never install it.
-
-Regular installs never pick pre-releases up. Ask for them explicitly:
+**Development build** — the latest code from `main`, published on every push. These are
+pre-releases, so plain `pip install` will never give you one; you have to ask:
 
 ```bash
 pip install --pre --upgrade amsky
+```
+
+`--upgrade` matters even on a fresh install. Without it, running `pip install --pre amsky`
+in an environment that already has the stable version does nothing at all — pip treats
+the requirement as satisfied and says so only in passing.
+
+Check what you ended up with at any time:
+
+```bash
+pip show amsky | head -2
+```
+
+A stable version looks like `1.0.0`. A development build looks like
+`1.0.1.dev202608091105` — the number is the UTC build time, and it is versioned against
+the *next* release, not the current one. (Under PEP 440, `1.0.0.devN` would sort
+*before* the released `1.0.0`, so pip would refuse to install it.)
+
+### 4. Run
+
+```bash
+amsky-viewer --port /dev/ttyACM0
+```
+
+To run without activating the environment first — needed in cron jobs, systemd units
+and scripts — call the executable by its full path:
+
+```bash
+~/amsky/venv/bin/amsky-viewer --port /dev/ttyACM0 --headless --log
 ```
 
 ### Serial port permissions (Linux)
@@ -114,6 +120,61 @@ Your user needs access to the serial device. On most distributions:
 ```bash
 sudo usermod -aG dialout $USER   # log out and back in
 ```
+
+### Updating
+
+With the environment active (`cd ~/amsky && source venv/bin/activate`):
+
+```bash
+pip install --upgrade amsky            # to the newest stable release
+pip install --pre --upgrade amsky      # to the newest development build
+```
+
+Switching from a development build back to stable needs `--force-reinstall`. Plain
+`--upgrade` will not do it, because the dev build you have installed has a higher
+version number than the stable release and pip sees no upgrade to perform:
+
+```bash
+pip install --force-reinstall amsky
+```
+
+You can also pin an exact version, which works in either direction:
+
+```bash
+pip install amsky==1.0.0
+```
+
+### Removing
+
+The environment is a plain directory, so deleting it removes every trace of the install:
+
+```bash
+rm -rf ~/amsky/venv
+```
+
+Your logs in `~/amsky` are untouched by that.
+
+### Alternative: pipx
+
+If you only want the command-line tools and never plan to import the modules, `pipx`
+manages the virtual environment for you:
+
+```bash
+pipx install amsky                              # stable
+pipx install --pip-args=--pre amsky             # development build
+pipx upgrade amsky                              # update
+pipx upgrade --pip-args=--pre amsky             # update, staying on dev builds
+```
+
+Note that `pipx` puts the commands on your `PATH` but gives you no environment to
+activate, so there is no working directory implied — run them from wherever you want
+the logs to land. Run `pipx ensurepath` once if the commands are not found afterwards.
+
+### Dependencies
+
+Installing pulls in PySide6, pyqtgraph, numpy, pandas, matplotlib, h5py, pyserial and
+psutil. The Qt dependency is large, but the viewer runs fine with `--headless` and no
+display attached — useful on a small machine such as a Raspberry Pi in an observatory.
 
 ---
 
