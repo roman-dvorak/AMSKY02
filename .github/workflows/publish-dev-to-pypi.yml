@@ -40,22 +40,48 @@ jobs:
 
       - name: Bump version to dev (in version.py)
         run: |
+          python -m pip install --upgrade pip packaging
           python - <<'PY'
-          import re, pathlib, os, datetime
+          import re, json, pathlib, datetime, urllib.request, urllib.error
+          from packaging.version import Version
+
           p = pathlib.Path('version.py')
           s = p.read_text()
           m = re.search(r"__version__\s*=\s*\"([^\"]+)\"", s)
           if not m:
               raise SystemExit('version.py: __version__ not found')
-          base = m.group(1)
-          # strip any existing suffix
-          base = re.sub(r"(\.dev.*|\+.*)$", "", base)
+          base = Version(re.sub(r"(\.dev.*|\+.*)$", "", m.group(1)))
+
+          # X.Y.Z.devN je podle PEP 440 pre-release VERZE X.Y.Z, takže se
+          # řadí PŘED ni. Kdyby base byla už vydaná, dev build by byl pro
+          # pip starší než release a nikdy by se nenainstaloval ani s --pre.
+          # Proto se base musí zvednout nad nejvyšší existující release.
+          released = []
+          try:
+              req = urllib.request.Request(
+                  'https://pypi.org/simple/amsky/',
+                  headers={'Accept': 'application/vnd.pypi.simple.v1+json'})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  data = json.load(r)
+              released = [Version(v) for v in data.get('versions', [])]
+          except urllib.error.HTTPError as e:
+              if e.code != 404:      # 404 = projekt ještě neexistuje
+                  raise
+          finals = [v for v in released if not v.is_prerelease]
+
+          if finals and base <= max(finals):
+              rel = max(finals).release
+              major, minor, micro = (list(rel) + [0, 0, 0])[:3]
+              base = Version(f"{major}.{minor}.{micro + 1}")
+              print(f'version.py je <= poslednimu releasu, dev build miri na {base}')
+
           ts = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M')
-          # NOTE: PyPI rejects PEP 440 local version segments ("+gabc1234"),
-          # so the commit sha must not be appended here.
+          # NOTE: PyPI odmítá lokální version segment PEP 440 ("+gabc1234"),
+          # takže sem commit sha nepatří.
           new = f"{base}.dev{ts}"
-          s2 = re.sub(r"__version__\s*=\s*\"[^\"]+\"", f"__version__ = \"{new}\"", s)
-          p.write_text(s2)
+          if finals:
+              assert Version(new) > max(finals), f'{new} není novější než {max(finals)}'
+          p.write_text(re.sub(r"__version__\s*=\s*\"[^\"]+\"", f'__version__ = "{new}"', s))
           print('Set dev version:', new)
           PY
 

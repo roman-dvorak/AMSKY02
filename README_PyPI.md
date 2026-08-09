@@ -96,8 +96,12 @@ display attached — useful on a small machine such as a Raspberry Pi in an obse
 
 ### Development builds
 
-Every push to `main` publishes a pre-release versioned `X.Y.Z.devYYYYMMDDHHMM`. Regular
-installs never pick these up; ask for them explicitly:
+Every push to `main` publishes a pre-release. These are versioned against the *next*
+release, not the current one — after 1.0.0 is out, dev builds are `1.0.1.devYYYYMMDDHHMM`.
+That ordering matters: under PEP 440 a `1.0.0.devN` would sort *before* the released
+1.0.0, so pip would never install it.
+
+Regular installs never pick pre-releases up. Ask for them explicitly:
 
 ```bash
 pip install --pre --upgrade amsky

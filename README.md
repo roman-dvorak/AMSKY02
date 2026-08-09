@@ -49,7 +49,7 @@ source ~/amsky-venv/bin/activate
 pip install amsky
 ```
 
-Development builds go out from every push to `main` as `X.Y.Z.devYYYYMMDDHHMM`;
+Development builds go out from every push to `main`, versioned against the next release (`1.0.1.devYYYYMMDDHHMM` while 1.0.0 is current);
 install them with `pip install --pre --upgrade amsky`.
 
 | Command | Purpose |
