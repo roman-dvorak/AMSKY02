@@ -6,7 +6,7 @@ Běží celá v prohlížeči, nemá žádný backend. Produkční adresa:
 
 | Záložka | Co dělá |
 | --- | --- |
-| **Živě** | Připojí se k senzoru přes USB (Web Serial), ukazuje aktuální hodnoty, teplotní mapu oblohy z obou senzorů a grafy od připojení. Záznam lze stáhnout jako HDF5. Součástí je konzole pro příkazy (`config_show`, `set …`). |
+| **Živě** | Připojí se k senzoru přes USB (Web Serial), ukazuje aktuální hodnoty, teplotní mapu oblohy z obou senzorů a grafy od připojení. Záznam lze stáhnout jako HDF5. Součástí je konzole pro příkazy (`config_show`, `set …`). Místo sériového portu umí číst i HTTP API Python vieweru (`amsky-viewer --api`, výchozí `http://localhost:8080/data.json`) — hodí se, když port drží logger. |
 | **Archiv** | Prohlíží hodinové HDF5 logy z adresáře na webu. Adresu adresáře zadává uživatel; naposledy použité zdroje se pamatují a dají se připnout. |
 | **Soubory** | Otevře HDF5 logy z disku (přetažením nebo výběrem). Soubory se nikam neodesílají. |
 

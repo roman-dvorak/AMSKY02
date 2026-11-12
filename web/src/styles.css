@@ -771,6 +771,17 @@ input[type='range'] {
   gap: 0.5rem;
 }
 
+.api-connect {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.api-connect input {
+  width: 17rem;
+  max-width: 100%;
+}
+
 .inline-field {
   display: flex;
   align-items: center;

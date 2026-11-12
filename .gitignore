@@ -1,5 +1,12 @@
 venv
 
+# systemd/install.sh: místní nastavení, token a vygenerované unit soubory
+systemd/.env
+systemd/amsky-logger.env
+systemd/amsky-logger.service
+systemd/amsky-upload.service
+systemd/amsky-upload.timer
+
 *-backups
 *-save.kicad_pcb
 *-save.pro

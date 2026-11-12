@@ -1,0 +1,13 @@
+# AMSKY rclone SFTP remote template
+# Zkopíruj do ~/.config/rclone/rclone.conf a uprav dle potřeby
+#
+# Použití:
+#   rclone lsd remote:/storage/meteo/svakov/
+#   rclone copy ~/log/AMSKY remote:/storage/meteo/svakov/AMSKY02 --min-age 12m
+
+[remote]
+type = sftp
+host = space.astro.cz
+user = astrometers-service
+key_file = /home/astrometers/.ssh/space_ed25519
+# known_hosts_file = /home/astrometers/.ssh/known_hosts

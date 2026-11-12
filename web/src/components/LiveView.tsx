@@ -1,7 +1,10 @@
+import type { FormEvent } from 'react';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { DEFAULT_API_URL, normalizeApiUrl } from '../lib/apiSource';
 import { writeH5 } from '../lib/hdf5';
 import { live } from '../lib/liveController';
 import { serialSupported } from '../lib/serial';
+import { useStoredState } from '../lib/storage';
 import type { ColorRange } from '../lib/sky';
 import { centerAverage } from '../lib/sky';
 import { formatClock, formatDuration, hourStamp } from '../lib/time';
@@ -15,6 +18,8 @@ const BAUD_RATES = [9600, 19200, 38400, 57600, 115200, 230400];
 const QUICK_COMMANDS = ['config_show', 'config_save', 'thrmap_on', 'thrmap_off'];
 /** Bez zprávy déle než tolik ms se hodnoty označí jako neaktuální. */
 const STALE_MS = 10_000;
+
+const isString = (value: unknown): value is string => typeof value === 'string';
 
 function num(value: number | undefined, digits = 2): string {
   return value !== undefined && Number.isFinite(value) ? value.toFixed(digits) : '—';
@@ -60,6 +65,8 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
   const version = useSyncExternalStore(session.subscribe, session.getVersion);
 
   const [baud, setBaud] = useState(115200);
+  const [apiUrl, setApiUrl] = useStoredState<string>('amsky.live.apiUrl', DEFAULT_API_URL, isString);
+  const [apiUrlError, setApiUrlError] = useState<string | null>(null);
   const [command, setCommand] = useState('');
   const [manualRange, setManualRange] = useState<ColorRange | null>(null);
   const [skySettings, setSkySettings] = useSkySettings();
@@ -147,6 +154,20 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
     setCommand('');
   };
 
+  const connectApi = (event: FormEvent) => {
+    event.preventDefault();
+    let url: string;
+    try {
+      url = normalizeApiUrl(apiUrl);
+    } catch {
+      setApiUrlError(`Neplatná adresa API: ${apiUrl}`);
+      return;
+    }
+    setApiUrlError(null);
+    setApiUrl(url);
+    void live.connectApi(url);
+  };
+
   const lightChannels = Array.from(latest.light.keys()).sort((a, b) => a - b);
   const cloudIds = Array.from(latest.cloud.keys()).sort((a, b) => a - b);
   const hygro = latest.hygro?.valid ? latest.hygro : null;
@@ -157,7 +178,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
         <div className="connect-actions">
           {connected || live.state === 'connecting' ? (
             <button type="button" className="primary" onClick={() => void live.disconnect()}>
-              {live.source === 'demo' ? 'Zastavit simulátor' : 'Odpojit'}
+              {live.source === 'demo' ? 'Zastavit simulátor' : live.source === 'api' ? 'Odpojit od API' : 'Odpojit'}
             </button>
           ) : (
             <>
@@ -174,6 +195,18 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
                   ))}
                 </select>
               </label>
+              <form className="api-connect" onSubmit={connectApi}>
+                <input
+                  type="text"
+                  value={apiUrl}
+                  onChange={(e) => setApiUrl(e.target.value)}
+                  placeholder={DEFAULT_API_URL}
+                  aria-label="Adresa HTTP API vieweru"
+                  title="Adresa HTTP API Python vieweru (amsky-viewer --api)"
+                  spellCheck={false}
+                />
+                <button type="submit">Připojit k API</button>
+              </form>
               <button type="button" onClick={() => live.startDemo()}>
                 Simulátor
               </button>
@@ -190,6 +223,10 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
                 ? 'Nepřipojeno'
                 : live.source === 'demo'
                   ? 'Simulátor (nejde o skutečná data)'
+                  : live.source === 'api'
+                    ? stale
+                      ? `API ${live.apiUrl} — ${Math.round((now - session.lastMessageAt!) / 1000)} s bez dat`
+                      : `Připojeno k API ${live.apiUrl}`
                   : stale
                     ? `Připojeno — ${Math.round((now - session.lastMessageAt!) / 1000)} s bez dat`
                     : 'Připojeno'}
@@ -209,7 +246,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
           (Firefox a Safari sériový port nepodporují). Prohlížení logů a simulátor fungují všude.
         </div>
       )}
-      {live.error && <div className="error-banner">{live.error}</div>}
+      {(apiUrlError ?? live.error) && <div className="error-banner">{apiUrlError ?? live.error}</div>}
       {connected && session.messageCount === 0 && now - (session.log[0]?.time ?? now) > 5000 && (
         <div className="status-banner">
           Port je otevřený, ale nepřicházejí žádná data. Zkontrolujte, že je vybraný správný port a rychlost.
@@ -250,7 +287,12 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
         <div className="section-head">
           <h2>Obloha — teplotní mapa</h2>
           <label className="check">
-            <input type="checkbox" checked={live.thrmap} onChange={(e) => void live.setThrmap(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={live.thrmap}
+              disabled={live.source === 'api'}
+              onChange={(e) => void live.setThrmap(e.target.checked)}
+            />
             Přijímat teplotní mapu
           </label>
         </div>

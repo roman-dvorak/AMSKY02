@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+import urllib.request
+import urllib.error
+from collections import deque
 
 import numpy as np
 import serial
@@ -50,6 +53,28 @@ PIXELS = ROWS * COLS
 TAU_LENS = 0.90
 BETA = 0.2
 K_ATM = 0.03
+
+# TSL2591 konstanty
+_TSL_DF = 408.0   # device factor (Adafruit)
+_TSL_B  = 1.64    # lux formula koeficienty
+_TSL_C  = 0.59
+_TSL_D  = 0.86
+_TSL_LOW_SIGNAL_THRESHOLD  = 10    # counts pod touto hodnotou = LOW_SIGNAL
+_TSL_IR_DOMINATED_THRESHOLD = 0.90  # IR_ratio nad touto hodnotou = IR_DOMINATED
+_TSL_VISIBLE_MIN_FRACTION   = 0.05  # viditelná složka pod 5 % = VISIBLE_UNRELIABLE
+
+# Kódování quality pro HDF5 (uint8)
+QUALITY_CODES = {"OK": 0, "LOW_SIGNAL": 1, "IR_DOMINATED": 2,
+                 "VISIBLE_UNRELIABLE": 3, "SATURATED": 4}
+QUALITY_NAMES = {v: k for k, v in QUALITY_CODES.items()}
+QUALITY_UNKNOWN = 255  # quality nebyla vyhodnocena (ERROR, log z GUI, starší řádky)
+
+# Datasety ve skupinách /light0 a /light1
+LIGHT_DATASETS = {
+    "all": np.float32, "ir": np.float32, "gain": np.float32, "expo": np.float32,
+    "time": np.int64,
+    "ir_ratio": np.float32, "visible": np.float32, "quality": np.uint8,
+}
 
 
 def parse_thrmap(line: str):
@@ -279,13 +304,70 @@ def calculate_tsl2591_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
     # Alternativní lux výpočet #1 (používaný v aktuální knihovně)
     # Tento algoritmus používá dynamický koeficient založený na poměru IR/Full
     # Reference: https://github.com/adafruit/Adafruit_TSL2591_Library/issues/14
-    if ch0_full > 0:
-        lux = ((float(ch0_full) - float(ch1_ir)) * (1.0 - (float(ch1_ir) / float(ch0_full)))) / cpl
-    else:
-        lux = 0.0
-    
+    vis = float(ch0_full) - float(ch1_ir)
+    if ch0_full <= 0 or vis <= 0:
+        return 0.0
+
+    lux = (vis * (1.0 - float(ch1_ir) / float(ch0_full))) / cpl
     return lux
 
+
+def calculate_tsl2591_measurement(ch0_raw: int, ch1_raw: int,
+                                   gain: float, itime_ms: float,
+                                   ch0_dark: float = 0.0,
+                                   ch1_dark: float = 0.0) -> dict:
+    """Úplné měření TSL2591 s korekcí dark offsetu a quality flag.
+
+    Vrací dict:
+        ch0_raw, ch1_raw       – surové hodnoty
+        ch0_corr, ch1_corr     – po odečtení dark offsetu (≥ 0)
+        ir_ratio               – CH1_corr / CH0_corr (None při LOW_SIGNAL/SATURATED)
+        visible_estimate       – CH0_corr * (1 - ir_ratio) (≥ 0)
+        lux                    – výsledný lux (≥ 0)
+        quality                – OK | LOW_SIGNAL | IR_DOMINATED |
+                                  VISIBLE_UNRELIABLE | SATURATED
+    """
+    result = dict(ch0_raw=int(ch0_raw), ch1_raw=int(ch1_raw),
+                  ch0_corr=0.0, ch1_corr=0.0,
+                  ir_ratio=None, visible_estimate=0.0,
+                  lux=0.0, quality=None)
+
+    if ch0_raw >= 0xFFFF or ch1_raw >= 0xFFFF:
+        result["quality"] = "SATURATED"
+        return result
+
+    ch0_corr = max(0.0, float(ch0_raw) - float(ch0_dark))
+    ch1_corr = max(0.0, float(ch1_raw) - float(ch1_dark))
+    result["ch0_corr"] = ch0_corr
+    result["ch1_corr"] = ch1_corr
+
+    if ch0_corr < _TSL_LOW_SIGNAL_THRESHOLD:
+        result["quality"] = "LOW_SIGNAL"
+        return result
+
+    ir_ratio = ch1_corr / ch0_corr
+    result["ir_ratio"] = ir_ratio
+    visible_estimate = max(0.0, ch0_corr * (1.0 - ir_ratio))
+    result["visible_estimate"] = visible_estimate
+
+    if ir_ratio > _TSL_IR_DOMINATED_THRESHOLD:
+        result["quality"] = "IR_DOMINATED"
+    elif (1.0 - ir_ratio) < _TSL_VISIBLE_MIN_FRACTION:
+        result["quality"] = "VISIBLE_UNRELIABLE"
+    else:
+        result["quality"] = "OK"
+
+    cpl = itime_ms * gain / _TSL_DF
+    if cpl > 0:
+        lux = max(0.0, max(
+            (ch0_corr - _TSL_B * ch1_corr) / cpl,
+            (_TSL_C * ch0_corr - _TSL_D * ch1_corr) / cpl,
+        ))
+    else:
+        lux = 0.0
+    result["lux"] = lux
+
+    return result
 
 
 
@@ -476,7 +558,7 @@ class HDF5Logger:
 
         # /light0 a /light1 — TSL2591 na obou kanálech I2C muxu, odděleně
         for ch in (0, 1):
-            for name in ("all", "ir", "gain", "expo", "time"):
+            for name in LIGHT_DATASETS:
                 setattr(self, f"light{ch}_{name}", None)
 
         # /cloud{1,2}/ — rohy + střed + Vdd
@@ -577,37 +659,24 @@ class HDF5Logger:
             self.hygro_time = hygro_grp["time"]
         
         # Skupiny /light0 a /light1 — TSL2591 na obou kanálech I2C muxu
+        def _ds(grp, name, dtype):
+            """Vytvoří nebo otevře scalar dataset ve skupině /light{ch}.
+
+            Soubor založený starší verzí nemusí novější datasety obsahovat;
+            chybějící se doplní a starší řádky v nich zůstanou "neznámé"
+            (NaN, resp. kód 255 u quality).
+            """
+            if name not in grp:
+                fill = QUALITY_UNKNOWN if dtype == np.uint8 else (0 if dtype == np.int64 else np.nan)
+                return grp.create_dataset(name, shape=(0,), maxshape=(None,),
+                                          dtype=dtype, chunks=(1024,), fillvalue=fill)
+            return grp[name]
+
         for ch in (0, 1):
             gname = f"light{ch}"
-            if gname not in f:
-                light_grp = f.create_group(gname)
-                setattr(self, f"light{ch}_all", light_grp.create_dataset(
-                    "all", shape=(0,), maxshape=(None,),
-                    dtype=np.float32, chunks=(1024,)
-                ))
-                setattr(self, f"light{ch}_ir", light_grp.create_dataset(
-                    "ir", shape=(0,), maxshape=(None,),
-                    dtype=np.float32, chunks=(1024,)
-                ))
-                setattr(self, f"light{ch}_gain", light_grp.create_dataset(
-                    "gain", shape=(0,), maxshape=(None,),
-                    dtype=np.float32, chunks=(1024,)
-                ))
-                setattr(self, f"light{ch}_expo", light_grp.create_dataset(
-                    "expo", shape=(0,), maxshape=(None,),
-                    dtype=np.float32, chunks=(1024,)
-                ))
-                setattr(self, f"light{ch}_time", light_grp.create_dataset(
-                    "time", shape=(0,), maxshape=(None,),
-                    dtype=np.int64, chunks=(1024,)
-                ))
-            else:
-                light_grp = f[gname]
-                setattr(self, f"light{ch}_all", light_grp["all"])
-                setattr(self, f"light{ch}_ir", light_grp["ir"])
-                setattr(self, f"light{ch}_gain", light_grp["gain"])
-                setattr(self, f"light{ch}_expo", light_grp["expo"])
-                setattr(self, f"light{ch}_time", light_grp["time"])
+            light_grp = f[gname] if gname in f else f.create_group(gname)
+            for name, dtype in LIGHT_DATASETS.items():
+                setattr(self, f"light{ch}_{name}", _ds(light_grp, name, dtype))
 
         # Skupiny /cloud1 a /cloud2 — rohy, střed a Vdd
         for sid in (1, 2):
@@ -669,30 +738,27 @@ class HDF5Logger:
         
         self.current_file.flush()
     
-    def log_light(self, channel: int, full: float, ir: float, gain: float, expo: float):
+    def log_light(self, channel: int, full: float, ir: float, gain: float, expo: float,
+                  ir_ratio: float = float('nan'), visible: float = float('nan'),
+                  quality: str = None):
         """Zaloguje data z TSL2591 daného kanálu muxu (0/1) do /light{channel}."""
         self._ensure_file()
 
-        timestamp = self._get_timestamp_ns()
-
-        all_ds = getattr(self, f"light{channel}_all")
-        ir_ds = getattr(self, f"light{channel}_ir")
-        gain_ds = getattr(self, f"light{channel}_gain")
-        expo_ds = getattr(self, f"light{channel}_expo")
-        time_ds = getattr(self, f"light{channel}_time")
-
-        n = all_ds.shape[0]
-        all_ds.resize((n + 1,))
-        ir_ds.resize((n + 1,))
-        gain_ds.resize((n + 1,))
-        expo_ds.resize((n + 1,))
-        time_ds.resize((n + 1,))
-
-        all_ds[n] = full
-        ir_ds[n] = ir
-        gain_ds[n] = gain
-        expo_ds[n] = expo
-        time_ds[n] = timestamp
+        values = {
+            "all": full,
+            "ir": ir,
+            "gain": gain,
+            "expo": expo,
+            "time": self._get_timestamp_ns(),
+            "ir_ratio": ir_ratio,
+            "visible": visible,
+            "quality": QUALITY_CODES.get(quality, QUALITY_UNKNOWN),
+        }
+        n = getattr(self, f"light{channel}_all").shape[0]
+        for name, value in values.items():
+            ds = getattr(self, f"light{channel}_{name}")
+            ds.resize((n + 1,))
+            ds[n] = value
 
         self.current_file.flush()
     
@@ -729,11 +795,24 @@ class DataHTTPHandler(BaseHTTPRequestHandler):
     
     data_source = None  # Bude nastaveno z hlavního okna
     
+    def _send_cors_headers(self):
+        # API čte i webový prohlížeč z jiného původu (viewer.amsky.astrometers.eu);
+        # Allow-Private-Network povoluje dotaz z veřejné stránky na místní adresu.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._send_cors_headers()
+        self.end_headers()
+
     def do_GET(self):
-        if self.path == "/data.json":
+        if self.path.split("?", 1)[0] == "/data.json":
             self.send_response(200)
             self.send_header("Content-type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Cache-Control", "no-store")
+            self._send_cors_headers()
             self.end_headers()
             
             if self.data_source:
@@ -750,6 +829,80 @@ class DataHTTPHandler(BaseHTTPRequestHandler):
         pass
 
 
+class SkyBrightnessUploader:
+    """Periodicky odesílá SQM + vlhkost na skybrightness.com API."""
+
+    def __init__(self, data_source, url: str, token: str, interval: float, channel: int = 0):
+        self._data_source = data_source
+        # Kanál TSL2591 (0/1), jehož SQM se odesílá
+        self._channel = channel
+        self._url = url
+        self._token = token
+        self._interval = interval
+        self._running = False
+        self._thread = Thread(target=self._loop, daemon=True)
+
+    def start(self):
+        self._running = True
+        self._thread.start()
+        print(f"Skybrightness upload aktivní: {self._url}  interval={self._interval:.0f}s  "
+              f"kanál=light{self._channel}")
+
+    def stop(self):
+        self._running = False
+
+    def _loop(self):
+        time.sleep(self._interval)
+        while self._running:
+            try:
+                self._upload()
+            except Exception as e:
+                print(f"Upload chyba: {e}", file=sys.stderr)
+            time.sleep(self._interval)
+
+    def _upload(self):
+        data = self._data_source.get_json_data()
+        sqm = (data.get(f"light{self._channel}") or {}).get("sqm")
+        humidity = (data.get("hygro") or {}).get("rh")
+
+        if sqm is None:
+            print("Upload přeskočen: SQM není k dispozici", file=sys.stderr)
+            return
+
+        ts = data.get("timestamp")
+        try:
+            dt = datetime.fromisoformat(ts) if ts else datetime.now(timezone.utc)
+            # Časová značka bez zóny je místní čas (datetime.now()); astimezone
+            # ji převede na UTC.
+            measured_at = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            measured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        payload = {
+            "measured_at": measured_at,
+            "luminance": round(sqm, 3),
+        }
+        if humidity is not None:
+            payload["humidity"] = round(humidity, 1)
+
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            self._url,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            status = resp.status
+
+        ts_str = datetime.now().strftime("%H:%M:%S")
+        print(f"[{ts_str}] Skybrightness upload OK: SQM={sqm:.3f} HTTP {status}", flush=True)
+
+
 class HeadlessRunner:
     """Headless (no-GUI) běh nad seriovou linkou.
 
@@ -758,11 +911,19 @@ class HeadlessRunner:
     """
 
     def __init__(self, ser, device_id="AMSKY02", log_path=".",
-                 enable_logging=True, verbose=False, sqm_zp=24.0,
-                 stats_interval=10.0):
+                 enable_logging=True, verbose=False, sqm_zp=12.6,
+                 stats_interval=10.0, log_rate=None,
+                 http_enabled=False, http_port=8080,
+                 tsl_dark_ch0=0.0, tsl_dark_ch1=0.0,
+                 tsl_avg_n=20):
         self.ser = ser
         self.verbose = verbose
         self.sqm_zp = sqm_zp
+        self.tsl_dark_ch0 = tsl_dark_ch0
+        self.tsl_dark_ch1 = tsl_dark_ch1
+        # Klouzavý průměr raw hodnot zvlášť pro každý kanál TSL2591
+        self._tsl = {ch: {"ch0": deque(maxlen=tsl_avg_n), "ch1": deque(maxlen=tsl_avg_n),
+                          "gain": None, "itime": None} for ch in (0, 1)}
         self.stats_interval = stats_interval
 
         self.line_buffer = ""
@@ -785,11 +946,56 @@ class HeadlessRunner:
                          "cloud_meta1": 0, "cloud_meta2": 0}
         self._stats_last = time.time()
         self._running = True
+        self.log_rate = log_rate
+        self._last_log_time = {}
+
+        # Aktuální data pro HTTP API
+        self.current_data = {
+            "timestamp": None,
+            "hygro": {"temp": None, "rh": None, "dew_point": None},
+            "light0": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None,
+                       "sqm": None, "quality": None, "ir_ratio": None},
+            "light1": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None,
+                       "sqm": None, "quality": None, "ir_ratio": None},
+            "mlx1": {"vdd": None, "ta": None},
+            "mlx2": {"vdd": None, "ta": None},
+            "cloud1": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
+            "cloud2": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
+            "thrmap1": None,
+            "thrmap2": None,
+        }
+
+        # HTTP API
+        self.http_server = None
+        self.http_thread = None
+        if http_enabled:
+            try:
+                DataHTTPHandler.data_source = self
+                self.http_server = HTTPServer(("", http_port), DataHTTPHandler)
+                self.http_thread = Thread(target=self.http_server.serve_forever, daemon=True)
+                self.http_thread.start()
+                print(f"HTTP API aktivní na portu {http_port} -> /data.json")
+            except Exception as e:
+                print(f"VAROVÁNÍ: nelze spustit HTTP server: {e}", file=sys.stderr)
+
+    def get_json_data(self):
+        return self.current_data.copy()
 
     def _vlog(self, msg: str):
         if self.verbose:
             ts = datetime.now().strftime("%H:%M:%S")
             print(f"[{ts}] {msg}", flush=True)
+
+    def _should_log(self, data_type: str) -> bool:
+        """Vrací True, pokud uplynul dostatečný čas od posledního logu daného typu."""
+        if self.log_rate is None or self.log_rate <= 0:
+            return True
+        now = time.time()
+        last = self._last_log_time.get(data_type, 0)
+        if now - last >= self.log_rate:
+            self._last_log_time[data_type] = now
+            return True
+        return False
 
     def _print_stats(self):
         now = time.time()
@@ -810,10 +1016,13 @@ class HeadlessRunner:
         if not s:
             return
 
+        self.current_data["timestamp"] = datetime.now().isoformat()
+
         if s.startswith("$HELLO,"):
             info = parse_hello(s)
             if info is not None:
                 self.device_info = info
+                self.current_data["device"] = info
                 if self.logger:
                     self.logger.set_device_info(info)
                 print(f"Zařízení: {info.get('device_model', '?')} SN {info['serial_number']} "
@@ -826,10 +1035,13 @@ class HeadlessRunner:
                 return
             sensor_id, frame = result
             self.counters[f"thrmap{sensor_id}"] += 1
+            self.current_data[f"thrmap{sensor_id}"] = frame.flatten().tolist()
             self._vlog(f"thrmap S{sensor_id}: min={frame.min():.2f} "
                        f"max={frame.max():.2f} mean={frame.mean():.2f} °C")
             if self.logger and self.last_ta[sensor_id] is not None:
-                self.logger.log_sky(sensor_id, frame, self.last_ta[sensor_id])
+                if self._should_log(f"sky{sensor_id}"):
+                    self.logger.log_sky(sensor_id, frame, self.last_ta[sensor_id])
+                    self._vlog(f"  -> logged sky{sensor_id} to HDF5")
             return
 
         if s.startswith("$hygro,"):
@@ -838,30 +1050,79 @@ class HeadlessRunner:
                 return
             t, rh, dew = v
             self.counters["hygro"] += 1
+            self.current_data["hygro"].update({"temp": t, "rh": rh, "dew_point": dew})
             self._vlog(f"hygro: T={t:.2f}°C RH={rh:.2f}% dew={dew:.2f}°C")
             if self.logger:
-                self.logger.log_hygro(t, rh)
+                if self._should_log("hygro"):
+                    self.logger.log_hygro(t, rh)
+                    self._vlog(f"  -> logged hygro to HDF5")
             return
 
         if s.startswith("$light,"):
             v = parse_light(s)
             if v is None:
                 return
-            channel, lux, full_raw, ir_raw, gain, itime, sqm_fw = v
+            channel, _, full_raw, ir_raw, gain, itime, sqm_fw = v
             self.counters[f"light{channel}"] += 1
+            tsl = self._tsl[channel]
+            ch0_avg, ch1_avg = float(full_raw), float(ir_raw)
             try:
                 gain_val = gain_str_to_float(gain)
                 itime_val = float(str(itime).rstrip('ms'))
-                sqm_calc = calculate_sqm(int(full_raw), int(ir_raw),
-                                         itime_val, gain_val, self.sqm_zp)
-                sqm_str = f"{sqm_calc:.2f}" if sqm_calc != float('inf') else "inf"
+
+                # Resetuj buffer při změně gain nebo integration time
+                if gain_val != tsl["gain"] or itime_val != tsl["itime"]:
+                    tsl["ch0"].clear()
+                    tsl["ch1"].clear()
+                    tsl["gain"] = gain_val
+                    tsl["itime"] = itime_val
+
+                tsl["ch0"].append(int(full_raw))
+                tsl["ch1"].append(int(ir_raw))
+                ch0_avg = sum(tsl["ch0"]) / len(tsl["ch0"])
+                ch1_avg = sum(tsl["ch1"]) / len(tsl["ch1"])
+
+                meas = calculate_tsl2591_measurement(
+                    ch0_avg, ch1_avg, gain_val, itime_val,
+                    self.tsl_dark_ch0, self.tsl_dark_ch1,
+                )
+                lux      = meas["lux"]
+                quality  = meas["quality"]
+                ir_ratio = meas["ir_ratio"]
+                visible  = meas["visible_estimate"]
+
+                # SQM z visible_estimate (stejný vzorec, ale s dark-korigovanými daty)
+                sqm_calc = None
+                if visible and visible > 0 and gain_val > 0 and itime_val > 0:
+                    vis_norm = visible / (gain_val * itime_val / 200.0)
+                    if vis_norm > 0:
+                        sqm_calc = self.sqm_zp - 1.086 * math.log(vis_norm)
+
+                sqm_str = f"{sqm_calc:.2f}" if sqm_calc is not None else "n/a"
             except Exception:
-                gain_val, itime_val, sqm_str = 1.0, 100.0, "n/a"
+                lux, quality, ir_ratio, visible, sqm_calc, sqm_str = 0.0, "ERROR", None, None, None, "err"
+                gain_val, itime_val = 1.0, 100.0
+
+            self.current_data[f"light{channel}"].update({
+                "lux": lux, "full": full_raw, "ir": ir_raw,
+                "full_avg": round(ch0_avg, 2), "ir_avg": round(ch1_avg, 2),
+                "n_avg": len(tsl["ch0"]),
+                "gain": gain, "itime": itime,
+                "sqm": sqm_calc, "sqm_fw": sqm_fw,
+                "quality": quality, "ir_ratio": ir_ratio,
+            })
             self._vlog(f"light ch{channel}: full={full_raw:.0f} ir={ir_raw:.0f} "
-                       f"gain={gain} int={itime} lux={lux:.4f} sqm={sqm_str}")
-            if self.logger:
+                       f"gain={gain} int={itime} lux={lux:.4f} "
+                       f"sqm={sqm_str} q={quality}")
+            if self.logger and self._should_log(f"light{channel}"):
                 try:
-                    self.logger.log_light(channel, full_raw, ir_raw, gain_val, itime_val)
+                    self.logger.log_light(
+                        channel, full_raw, ir_raw, gain_val, itime_val,
+                        ir_ratio if ir_ratio is not None else float('nan'),
+                        visible if visible is not None else float('nan'),
+                        quality or "ERROR",
+                    )
+                    self._vlog(f"  -> logged light{channel} to HDF5")
                 except Exception as e:
                     print(f"chyba logování light: {e}", file=sys.stderr)
             return
@@ -874,6 +1135,7 @@ class HeadlessRunner:
             self.counters[f"cloud_meta{sensor_id}"] += 1
             self.last_ta[sensor_id] = ta
             self.last_vdd[sensor_id] = vdd
+            self.current_data[f"mlx{sensor_id}"].update({"vdd": vdd, "ta": ta})
             self._vlog(f"cloud_meta S{sensor_id}: Vdd={vdd:.3f} V Ta={ta:.3f} °C")
             return
 
@@ -883,11 +1145,16 @@ class HeadlessRunner:
                 return
             sensor_id, tl, tr, bl, br, ctr = v
             self.counters[f"cloud{sensor_id}"] += 1
+            self.current_data[f"cloud{sensor_id}"].update(
+                {"tl": tl, "tr": tr, "bl": bl, "br": br, "center": ctr}
+            )
             self._vlog(f"cloud S{sensor_id}: TL={tl:.2f} TR={tr:.2f} "
                        f"BL={bl:.2f} BR={br:.2f} C={ctr:.2f} °C")
             if self.logger:
-                self.logger.log_cloud(sensor_id, tl, tr, bl, br, ctr,
-                                      self.last_vdd[sensor_id])
+                if self._should_log(f"cloud{sensor_id}"):
+                    self.logger.log_cloud(sensor_id, tl, tr, bl, br, ctr,
+                                          self.last_vdd[sensor_id])
+                    self._vlog(f"  -> logged cloud{sensor_id} to HDF5")
             return
 
     def run(self):
@@ -919,6 +1186,8 @@ class HeadlessRunner:
         finally:
             if self.logger:
                 self.logger.close()
+            if self.http_server:
+                self.http_server.shutdown()
         return 0
 
 
@@ -975,8 +1244,8 @@ class ConfigDialog(QtWidgets.QDialog):
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, ser=None, vmin=None, vmax=None, rotation=0.0, debug=False,
-                 enable_logging=False, enable_http_api=False, device_id="AMSKY02", log_path=None, sqm_zp=24.0,
-                 replay_file=None, replay_speed=1.0, parent=None):
+                 enable_logging=False, enable_http_api=False, device_id="AMSKY02", log_path=None, sqm_zp=12.6,
+                 replay_file=None, replay_speed=1.0, log_rate=None, parent=None):
         super().__init__(parent)
         self.ser = ser
         self.vmin = vmin
@@ -1019,6 +1288,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.last_vdd1 = float('nan')
         self.last_vdd2 = float('nan')
         
+        # Rate-limiting pro logování
+        self.log_rate = log_rate
+        self._last_log_time = {}
+        
         # Režim zobrazení (raw vs calibrated)
         self.show_calibrated = False
         
@@ -1030,8 +1303,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current_data = {
             "timestamp": None,
             "hygro": {"temp": None, "rh": None, "dew_point": None},
-            "light0": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
-            "light1": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None, "sqm": None},
+            "light0": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None,
+                       "sqm": None, "quality": None, "ir_ratio": None},
+            "light1": {"lux": None, "full": None, "ir": None, "gain": None, "itime": None,
+                       "sqm": None, "quality": None, "ir_ratio": None},
             "mlx1": {"vdd": None, "ta": None},
             "mlx2": {"vdd": None, "ta": None},
             "cloud1": {"tl": None, "tr": None, "bl": None, "br": None, "center": None},
@@ -1473,6 +1748,17 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             self.statusBar().showMessage("Not logging")
     
+    def _should_log(self, data_type: str) -> bool:
+        """Vrací True, pokud uplynul dostatečný čas od posledního logu daného typu."""
+        if self.log_rate is None or self.log_rate <= 0:
+            return True
+        now = time.time()
+        last = self._last_log_time.get(data_type, 0)
+        if now - last >= self.log_rate:
+            self._last_log_time[data_type] = now
+            return True
+        return False
+    
     def toggle_http_api(self, enabled: bool):
         """Zapne/vypne HTTP API server."""
         if enabled:
@@ -1595,11 +1881,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 if sensor_id == 1:
                     self.current_data["thrmap1"] = frame.flatten().tolist()
                     if self.logging_enabled and self.logger and self.last_ta1 is not None:
-                        self.logger.log_sky(1, frame, self.last_ta1)
+                        if self._should_log("sky1"):
+                            self.logger.log_sky(1, frame, self.last_ta1)
                 elif sensor_id == 2:
                     self.current_data["thrmap2"] = frame.flatten().tolist()
                     if self.logging_enabled and self.logger and self.last_ta2 is not None:
-                        self.logger.log_sky(2, frame, self.last_ta2)
+                        if self._should_log("sky2"):
+                            self.logger.log_sky(2, frame, self.last_ta2)
             return
 
         if s.startswith("$hygro,"):
@@ -1620,7 +1908,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 
                 # Loguj do HDF5
                 if self.logging_enabled and self.logger:
-                    self.logger.log_hygro(t, rh)
+                    if self._should_log("hygro"):
+                        self.logger.log_hygro(t, rh)
                 
                 self.update_data_table()
             return
@@ -1668,17 +1957,17 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 # Loguj do HDF5
                 if self.logging_enabled and self.logger:
-                    try:
-                        gain_map = {"1x": 1.0, "16x": 16.0, "25x": 25.0, "400x": 400.0, "428x": 428.0}
-                        gain_val = gain_map.get(gain, 1.0)
+                    if self._should_log(f"light{channel}"):
+                        try:
+                            # Firmware posílá gain a integrační čas jako čísla
+                            # ("25", "600"); starší verze s jednotkou ("25x", "600ms").
+                            gain_val = gain_str_to_float(gain)
+                            expo_val = float(str(itime).rstrip('ms'))
 
-                        expo_map = {"100ms": 100.0, "200ms": 200.0, "300ms": 300.0, "400ms": 400.0, "500ms": 500.0, "600ms": 600.0}
-                        expo_val = expo_map.get(itime, 100.0)
-
-                        self.logger.log_light(channel, full_raw, ir_raw, gain_val, expo_val)
-                    except Exception as e:
-                        if self.debug:
-                            print(f"Error logging light: {e}")
+                            self.logger.log_light(channel, full_raw, ir_raw, gain_val, expo_val)
+                        except Exception as e:
+                            if self.debug:
+                                print(f"Error logging light: {e}")
 
                 self.update_data_table()
             return
@@ -1723,7 +2012,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.current_data["cloud1"]["br"] = br
                     self.current_data["cloud1"]["center"] = ctr
                     if self.logging_enabled and self.logger:
-                        self.logger.log_cloud(1, tl, tr, bl, br, ctr, self.last_vdd1)
+                        if self._should_log("cloud1"):
+                            self.logger.log_cloud(1, tl, tr, bl, br, ctr, self.last_vdd1)
                 elif sensor_id == 2:
                     self.lbl_tl2.setText(f"{tl:.2f}")
                     self.lbl_tr2.setText(f"{tr:.2f}")
@@ -1736,7 +2026,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     self.current_data["cloud2"]["br"] = br
                     self.current_data["cloud2"]["center"] = ctr
                     if self.logging_enabled and self.logger:
-                        self.logger.log_cloud(2, tl, tr, bl, br, ctr, self.last_vdd2)
+                        if self._should_log("cloud2"):
+                            self.logger.log_cloud(2, tl, tr, bl, br, ctr, self.last_vdd2)
 
                 self.update_data_table()
             return
@@ -2083,13 +2374,33 @@ def main():
     parser.add_argument("--api", action="store_true", help="zapni HTTP API při startu")
     parser.add_argument("--log-name", type=str, default=None, help="ID zařízení pro názvy HDF5 souborů")
     parser.add_argument("--log-path", type=str, default=None, help="cesta pro ukládání HDF5 souborů")
-    parser.add_argument("--sqm-zp", type=float, default=24.0, help="SQM kalibrační konstanta (výchozí: 24.0)")
+    parser.add_argument("--sqm-zp", type=float, default=12.6, help="SQM kalibrační konstanta (výchozí: 12.6)")
     parser.add_argument("--headless", "--no-gui", dest="headless", action="store_true",
                         help="běh bez GUI — pouze parsování a logování ze seriové linky")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="vypisuj přijímané hodnoty na stdout")
     parser.add_argument("--stats-interval", type=float, default=10.0,
                         help="interval [s] pro souhrnný status v headless režimu (default 10)")
+    parser.add_argument("--log-rate", type=float, default=None,
+                        help="minimální interval [s] mezi záznamy do HDF5 (default: bez omezení)")
+    parser.add_argument("--http-port", type=int, default=8080,
+                        help="port pro HTTP API v headless režimu (default 8080)")
+    parser.add_argument("--tsl-dark-ch0", type=float, default=0.0,
+                        help="dark offset TSL2591 CH0/FULL [counts] (default 0)")
+    parser.add_argument("--tsl-dark-ch1", type=float, default=0.0,
+                        help="dark offset TSL2591 CH1/IR [counts] (default 0)")
+    parser.add_argument("--tsl-avg-n", type=int, default=20,
+                        help="počet měření pro klouzavý průměr CH0/CH1 (default 20)")
+    parser.add_argument("--upload-url", type=str, default=None,
+                        help="URL skybrightness API pro upload měření")
+    parser.add_argument("--upload-token", type=str,
+                        default=os.environ.get("AMSKY_UPLOAD_TOKEN"),
+                        help="Bearer token pro skybrightness API "
+                             "(výchozí: proměnná prostředí AMSKY_UPLOAD_TOKEN)")
+    parser.add_argument("--upload-interval", type=float, default=300.0,
+                        help="interval uploadu v sekundách (default 300 = 5 min)")
+    parser.add_argument("--upload-channel", type=int, choices=(0, 1), default=0,
+                        help="kanál TSL2591 (light0/light1), jehož SQM se odesílá (default 0)")
 
     args = parser.parse_args()
 
@@ -2122,8 +2433,28 @@ def main():
             verbose=args.verbose,
             sqm_zp=args.sqm_zp,
             stats_interval=args.stats_interval,
+            log_rate=args.log_rate,
+            http_enabled=args.api,
+            http_port=args.http_port,
+            tsl_dark_ch0=args.tsl_dark_ch0,
+            tsl_dark_ch1=args.tsl_dark_ch1,
+            tsl_avg_n=args.tsl_avg_n,
         )
+
+        uploader = None
+        if args.upload_url and args.upload_token:
+            uploader = SkyBrightnessUploader(
+                runner, args.upload_url, args.upload_token, args.upload_interval,
+                args.upload_channel,
+            )
+            uploader.start()
+        elif args.upload_url or args.upload_token:
+            print("VAROVÁNÍ: upload vyžaduje --upload-url i --upload-token", file=sys.stderr)
+
         rc = runner.run()
+
+        if uploader:
+            uploader.stop()
         try:
             ser.close()
         except Exception:
@@ -2210,6 +2541,7 @@ def main():
         sqm_zp=args.sqm_zp,
         replay_file=args.replay,
         replay_speed=args.replay_speed,
+        log_rate=args.log_rate,
     )
     win.resize(1100, 650)
     win.show()

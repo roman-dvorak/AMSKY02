@@ -1,13 +1,17 @@
 /**
- * Řídí zdroj živých dat (sériový port nebo simulátor) a plní jím relaci.
+ * Řídí zdroj živých dat (sériový port, HTTP API vieweru nebo simulátor) a plní jím relaci.
  * Žije mimo React, takže spojení přežije přepnutí záložky v aplikaci.
  */
+import { describeApiError, SnapshotConverter } from './apiSource';
 import { demoHello, demoTick } from './demo';
 import type { LinkState } from './serial';
 import { SerialLink } from './serial';
 import { LiveSession } from './session';
 
-export type Source = 'serial' | 'demo' | null;
+export type Source = 'serial' | 'api' | 'demo' | null;
+
+const API_POLL_MS = 1000;
+const API_TIMEOUT_MS = 4000;
 
 export class LiveController {
   readonly session = new LiveSession();
@@ -17,8 +21,14 @@ export class LiveController {
   /** Zda má zařízení posílat plnou teplotní mapu (`thrmap_on`). */
   thrmap = true;
 
+  /** Adresa /data.json, ze které se právě čte (zdroj `api`). */
+  apiUrl: string | null = null;
+
   private demoTimer: ReturnType<typeof setInterval> | null = null;
   private demoStep = 0;
+  private apiTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Roste s každým připojením k API; starší rozpracované dotazy se podle něj zahodí. */
+  private apiRun = 0;
 
   private readonly link = new SerialLink({
     onLine: (line) => this.session.ingestLine(line),
@@ -47,6 +57,58 @@ export class LiveController {
     await this.link.connect(baudRate);
   }
 
+  /** Čte živá data z HTTP API Python vieweru (`amsky-viewer --api`). */
+  async connectApi(url: string): Promise<void> {
+    if (this.state !== 'disconnected') return;
+    const run = ++this.apiRun;
+    const converter = new SnapshotConverter();
+    this.error = null;
+    this.source = 'api';
+    this.apiUrl = url;
+    this.state = 'connecting';
+    this.session.addLog('info', `Připojuji k API ${url}…`);
+
+    const poll = async (): Promise<void> => {
+      let snapshot: unknown;
+      let failure: string | null = null;
+      try {
+        const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        snapshot = await response.json();
+      } catch (error) {
+        failure = describeApiError(url, error, window.location.protocol);
+      }
+      if (run !== this.apiRun || this.source !== 'api') return;
+
+      if (failure) {
+        if (this.state === 'connecting') {
+          // První dotaz neprošel — nemá smysl opakovat, adresa je nejspíš špatně.
+          this.error = failure;
+          this.session.addLog('info', failure);
+          this.source = null;
+          this.apiUrl = null;
+          this.state = 'disconnected';
+          this.session.addLog('info', 'Odpojeno');
+          return;
+        }
+        // Výpadek za běhu: zkoušíme dál, stav ukáže „bez dat“.
+        if (this.error !== failure) this.session.addLog('info', failure);
+        this.error = failure;
+      } else {
+        if (this.state === 'connecting') {
+          this.state = 'connected';
+          this.session.addLog('info', 'Připojeno k API');
+        } else if (this.error) {
+          this.session.addLog('info', 'Spojení s API obnoveno');
+        }
+        this.error = null;
+        converter.toLines(snapshot).forEach((line) => this.session.ingestLine(line));
+      }
+      this.apiTimer = setTimeout(() => void poll(), API_POLL_MS);
+    };
+    await poll();
+  }
+
   startDemo(): void {
     if (this.state !== 'disconnected') return;
     this.error = null;
@@ -68,6 +130,16 @@ export class LiveController {
       this.session.addLog('info', 'Simulátor zastaven');
       return;
     }
+    if (this.source === 'api') {
+      this.apiRun++;
+      if (this.apiTimer) clearTimeout(this.apiTimer);
+      this.apiTimer = null;
+      this.source = null;
+      this.apiUrl = null;
+      this.state = 'disconnected';
+      this.session.addLog('info', 'Odpojeno od API');
+      return;
+    }
     await this.link.disconnect();
   }
 
@@ -79,6 +151,10 @@ export class LiveController {
       this.session.addLog('rx', '# simulátor příkazy neprovádí');
       return;
     }
+    if (this.source === 'api') {
+      this.session.addLog('info', 'Přes HTTP API nelze posílat příkazy — je jen pro čtení');
+      return;
+    }
     try {
       await this.link.send(text);
     } catch (error) {
@@ -88,6 +164,8 @@ export class LiveController {
 
   async setThrmap(enabled: boolean): Promise<void> {
     this.thrmap = enabled;
+    // U API o mapě rozhoduje viewer, který drží sériový port.
+    if (this.source === 'api') return;
     if (this.state === 'connected') await this.send(enabled ? 'thrmap_on' : 'thrmap_off');
     else this.session.addLog('info', `Teplotní mapa bude po připojení ${enabled ? 'zapnuta' : 'vypnuta'}`);
   }

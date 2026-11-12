@@ -213,11 +213,56 @@ amsky-viewer --port /dev/ttyACM0 --headless --log --verbose
 | `--log-name ID` | Device ID used in HDF5 filenames |
 | `--log-path PATH` | Directory for HDF5 files |
 | `--api` | Enable the HTTP JSON API at startup |
-| `--sqm-zp VALUE` | SQM calibration zero point (default 24.0) |
+| `--sqm-zp VALUE` | SQM calibration constant (default 12.6) |
+| `--log-rate S` | Minimum interval between HDF5 records of each kind (default: every reading) |
+| `--http-port PORT` | HTTP API port in headless mode (default 8080) |
+| `--tsl-dark-ch0 N`, `--tsl-dark-ch1 N` | TSL2591 dark offsets (counts) subtracted from the full / IR channel in headless mode |
+| `--tsl-avg-n N` | Moving-average length for the TSL2591 raw counts in headless mode (default 20) |
+| `--upload-url URL` | skybrightness.com API endpoint to upload SQM to (headless mode) |
+| `--upload-token TOKEN` | Bearer token for the upload; defaults to the `AMSKY_UPLOAD_TOKEN` environment variable |
+| `--upload-interval S` | Upload interval in seconds (default 300) |
+| `--upload-channel C` | Light channel (0 or 1) whose SQM is uploaded (default 0) |
 | `--headless`, `--no-gui` | Run without a GUI — parse and log only |
 | `--verbose`, `-v` | Print received values to stdout |
 | `--stats-interval S` | Status summary interval in headless mode |
 | `--debug` | Show every message received on the serial line |
+
+#### Uploading to skybrightness.com
+
+In headless mode the viewer can periodically post the current SQM (and humidity) to the
+[skybrightness.com](https://skybrightness.com) API:
+
+```bash
+export AMSKY_UPLOAD_TOKEN=...   # keeps the token out of the process list
+amsky-viewer --port /dev/ttyACM0 --headless --log \
+    --upload-url https://skybrightness.com/api/v1/measurements
+```
+
+The uploaded value is the SQM the viewer computes from the averaged, dark-corrected
+TSL2591 counts of the selected channel, using `--sqm-zp`. Nothing is sent while no valid
+SQM is available.
+
+#### Running as a service
+
+`systemd/install.sh` in the repository generates and installs systemd units for a
+headless logger and for a periodic `rclone` upload of the HDF5 files. Settings come from
+environment variables or `systemd/.env` (`DEVICE_NAME`, `SERIAL_PORT`, `LOG_PATH`,
+`LOG_RATE`, `SQM_ZP`, `HTTP_PORT`, `SKYBRIGHTNESS_URL`, `SKYBRIGHTNESS_TOKEN`,
+`RCLONE_REMOTE`, …); `./install.sh --dry-run` only writes the unit files.
+`upload/rclone.conf.template` is a starting point for the rclone remote.
+
+### `amsky-tui` — terminal dashboard
+
+A [rich](https://github.com/Textualize/rich)-based dashboard that polls the viewer's HTTP
+JSON API, so it can run on a different machine than the sensor:
+
+```bash
+amsky-viewer --port /dev/ttyACM0 --headless --api     # on the machine with the sensor
+amsky-tui --url http://HOST:8080/data.json            # anywhere
+```
+
+It shows both thermal maps and the readings of both light channels; `--vmin`/`--vmax` fix
+the colour scale and `--ta-coeff K` subtracts `K × Ta` from every pixel.
 
 ### `amsky-cli` — terminal client
 
@@ -296,9 +341,15 @@ timestamped datasets grouped per subsystem:
 ```
 /sky<N>/       thermal map frames, timestamps, sensor temperature
 /cloud<N>/     corner and centre temperatures
-/light<C>/     full-spectrum, IR, gain, integration time per channel
+/light<C>/     full-spectrum, IR, gain, integration time per channel;
+               ir_ratio, visible, quality (headless logger)
 /hygro/        temperature, humidity
 ```
+
+`quality` is `0` OK, `1` LOW_SIGNAL, `2` IR_DOMINATED, `3` VISIBLE_UNRELIABLE,
+`4` SATURATED, `255` not evaluated. The device identification from `$HELLO` is stored in
+the file attributes `device_model`, `serial_number`, `fw_version`, `git_hash` and
+`git_branch`.
 
 Files are named from `--log-name` and the session start time, and can be replayed later
 with `--replay`.
@@ -314,7 +365,7 @@ curl http://localhost:8080/data.json
 ```
 
 Port 8080 is the default; it is configurable in the viewer's settings panel and is
-remembered between runs.
+remembered between runs. In headless mode use `--api` together with `--http-port`.
 
 This makes it straightforward to feed an observatory dashboard, a weather-safety
 watchdog, or a home automation system without parsing the serial stream yourself.

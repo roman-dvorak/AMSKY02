@@ -80,6 +80,11 @@ release — `1.0.1.devYYYYMMDDHHMM` while 1.0.0 is current.
 | `amsky-viewer` | Real-time GUI viewer — thermal map, SQM, environment; HDF5 logging, HTTP JSON API, `--headless` mode, `--replay` of recorded sessions |
 | `amsky-cli` | Terminal (curses) client with CSV logging, works over serial or TCP |
 | `amsky-plot` | Plot recorded CSV logs to PNG or an interactive window |
+| `amsky-tui` | Terminal dashboard reading the viewer's HTTP JSON API (`amsky-viewer --headless --api`) |
+
+`amsky-viewer --headless` can also upload SQM to [skybrightness.com](https://skybrightness.com)
+(`--upload-url`, `--upload-token`), and `systemd/install.sh` sets up the logger and a periodic
+rclone upload of the HDF5 logs as systemd services.
 
 See [README_PyPI.md](README_PyPI.md) for full usage, options and the HDF5 layout.
 
