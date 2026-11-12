@@ -13,6 +13,9 @@ on:
       - 'doc/**'
       - 'hw/**'
       - 'fw/**'
+      # Webový prohlížeč se nasazuje samostatně (deploy-viewer.yml).
+      - 'web/**'
+      - '.github/workflows/deploy-viewer.yml'
   workflow_dispatch:
     inputs:
       reason:
