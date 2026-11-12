@@ -48,6 +48,9 @@ describe('HDF5 logs', () => {
     const bytes = await writeH5(session.data);
     const back = await parseH5('rec.h5', bytes);
 
+    expect(session.data.device?.serial).toBeTruthy();
+    expect(back.device).toEqual(session.data.device);
+
     expect(back.skies.map((s) => [s.name, s.rows, s.cols, s.frames.length])).toEqual([
       ['sky1', 24, 32, 4],
       ['sky2', 24, 32, 4],

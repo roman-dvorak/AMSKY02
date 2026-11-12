@@ -84,9 +84,31 @@ static void enterUf2Bootloader() {
   reset_usb_boot(0, 0);  // Reset to UF2 bootloader in ROM
 }
 
+// Send structured HELLO message with device identification
+// Format: $HELLO,<device_name>,<serial_number>,<fw_version>,<git_hash>,<git_branch>
+// Sent once at startup and again on the "hello" command, so a host that
+// connects later can still identify the device.
+static void sendHello() {
+  Serial.print("$HELLO,");
+  Serial.print(DEVICE_NAME);
+  Serial.print(",");
+  Serial.print(getDeviceSerialNumber());
+  Serial.print(",");
+  Serial.print(FW_VERSION);
+  Serial.print(",");
+  Serial.print(GIT_HASH);
+  Serial.print(",");
+  Serial.print(GIT_BRANCH);
+  Serial.println();
+}
+
 static void processSerialCommand(const char *cmd)
 {
-  if (strcmp(cmd, "i2c_scan") == 0 || strcmp(cmd, "i2c_scan_slow") == 0)
+  if (strcmp(cmd, "hello") == 0)
+  {
+    sendHello();
+  }
+  else if (strcmp(cmd, "i2c_scan") == 0 || strcmp(cmd, "i2c_scan_slow") == 0)
   {
     bool slow = (strcmp(cmd, "i2c_scan_slow") == 0);
     // PCA9543A podporuje max. 400 kHz - na 1 MHz (FM+) by neodpovídal.
@@ -261,18 +283,7 @@ void setup() {
   Serial.println("#");
   
   // Send structured HELLO message with device identification
-  // Format: $HELLO,<device_name>,<serial_number>,<fw_version>,<git_hash>,<git_branch>
-  Serial.print("$HELLO,");
-  Serial.print(DEVICE_NAME);
-  Serial.print(",");
-  Serial.print(serial_number);
-  Serial.print(",");
-  Serial.print(FW_VERSION);
-  Serial.print(",");
-  Serial.print(GIT_HASH);
-  Serial.print(",");
-  Serial.print(GIT_BRANCH);
-  Serial.println();
+  sendHello();
   
   // Initialize I2C1 with specific pins (GPIO 18=SDA, GPIO 19=SCL)
   Wire1.setSDA(SDA_PIN);

@@ -9,7 +9,7 @@
  * Chybějící skupina nebo dataset se přeskočí, soubor se kvůli tomu neodmítne.
  */
 import type { Dataset as H5Dataset, File as H5File, Group as H5Group } from 'h5wasm';
-import type { CloudData, Dataset, LightData, SkyData } from './types';
+import type { CloudData, Dataset, DeviceInfo, LightData, SkyData } from './types';
 import { emptyDataset } from './types';
 
 type H5Api = typeof import('h5wasm').default;
@@ -146,6 +146,29 @@ function readSky(file: H5File, name: string): SkyData | null {
   return { name, rows, cols, t: t.slice(0, n), temp: column(file, `${name}/temp`, n), frames };
 }
 
+/** Názvy atributů kořene souboru — shodné s `HDF5Logger` v Pythonu. */
+const DEVICE_ATTRS: [keyof DeviceInfo, string][] = [
+  ['model', 'device_model'],
+  ['serial', 'serial_number'],
+  ['fwVersion', 'fw_version'],
+  ['gitHash', 'git_hash'],
+  ['gitBranch', 'git_branch'],
+];
+
+function readDevice(file: H5File): DeviceInfo | undefined {
+  const device: DeviceInfo = { model: '', serial: '', fwVersion: '', gitHash: '', gitBranch: '' };
+  try {
+    const attrs = file.attrs;
+    for (const [key, attr] of DEVICE_ATTRS) {
+      const value = attrs[attr]?.value;
+      if (typeof value === 'string') device[key] = value;
+    }
+  } catch {
+    return undefined;
+  }
+  return device.serial ? device : undefined;
+}
+
 export async function parseH5(filename: string, input: ArrayBuffer | Uint8Array): Promise<Dataset> {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   // h5wasm u neplatného souboru nevyhodí výjimku při otevření, ale až
@@ -158,6 +181,8 @@ export async function parseH5(filename: string, input: ArrayBuffer | Uint8Array)
   try {
     file = new h5.File(path, 'r');
     const result = emptyDataset(filename);
+    const device = readDevice(file);
+    if (device) result.device = device;
     for (const name of childNames(file, /^cloud\d*$/)) {
       const cloud = readCloud(file, name);
       if (cloud) result.clouds.push(cloud);
@@ -214,6 +239,11 @@ export async function writeH5(data: Dataset): Promise<Uint8Array> {
   const path = `/out_${++fileCounter}.h5`;
   const file = new h5.File(path, 'w');
   try {
+    if (data.device) {
+      for (const [key, attr] of DEVICE_ATTRS) {
+        if (data.device[key]) file.create_attribute(attr, data.device[key]);
+      }
+    }
     for (const sky of data.skies) {
       const group = file.create_group(sky.name);
       const stride = sky.rows * sky.cols;

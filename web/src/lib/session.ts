@@ -4,7 +4,7 @@
  */
 import type { CloudMetaMsg, CloudMsg, HelloMsg, HygroMsg, LightMsg } from './protocol';
 import { parseLine } from './protocol';
-import type { CloudData, Dataset, LightData, SkyData } from './types';
+import type { CloudData, Dataset, DeviceInfo, LightData, SkyData } from './types';
 import { emptyCloud, emptyDataset, emptyLight, emptySky } from './types';
 
 /** ~24 h skalárních hodnot při periodě 2 s. */
@@ -33,6 +33,11 @@ export interface Latest {
   cloud: Map<number, CloudMsg & { time: number }>;
   meta: Map<number, CloudMetaMsg & { time: number }>;
   frames: Map<number, LatestFrame>;
+}
+
+function deviceInfo(msg: HelloMsg): DeviceInfo {
+  const { model, serial, fwVersion, gitHash, gitBranch } = msg;
+  return { model, serial, fwVersion, gitHash, gitBranch };
 }
 
 function emptyLatest(): Latest {
@@ -91,6 +96,7 @@ export class LiveSession {
   /** Smaže historii; identita zařízení zůstává (je to stále stejné připojení). */
   clear(): void {
     this.data = emptyDataset('Živý záznam');
+    if (this.device) this.data.device = deviceInfo(this.device);
     this.latest = emptyLatest();
     this.messageCount = 0;
     this.errorCount = 0;
@@ -153,6 +159,7 @@ export class LiveSession {
     switch (msg.type) {
       case 'hello':
         this.device = msg;
+        this.data.device = deviceInfo(msg);
         this.addLog('rx', line.trim(), now);
         break;
 

@@ -45,8 +45,19 @@ export interface SkyData {
   frames: Float32Array[];
 }
 
+/** Identifikace zařízení ze zprávy `$HELLO`; v HDF5 jako atributy kořene souboru. */
+export interface DeviceInfo {
+  model: string;
+  serial: string;
+  fwVersion: string;
+  gitHash: string;
+  gitBranch: string;
+}
+
 export interface Dataset {
   label: string;
+  /** Chybí u logů, které identifikaci zařízení neobsahují. */
+  device?: DeviceInfo;
   clouds: CloudData[];
   hygro: HygroData;
   lights: LightData[];

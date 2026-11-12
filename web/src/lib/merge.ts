@@ -55,6 +55,8 @@ export function mergeDatasets(files: Dataset[]): Dataset {
     (a, b) => (datasetTimeRange(a)?.from ?? Infinity) - (datasetTimeRange(b)?.from ?? Infinity),
   );
   const result = emptyDataset(sorted.map((f) => f.label).join(', '));
+  const device = sorted.find((f) => f.device)?.device;
+  if (device) result.device = device;
 
   for (const parts of groupByName(sorted.flatMap((f) => f.clouds)).values()) {
     result.clouds.push(concatColumns<CloudData>(parts, ['t', 'center', 'tl', 'tr', 'bl', 'br', 'vdd']));

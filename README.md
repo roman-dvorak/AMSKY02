@@ -144,6 +144,9 @@ $cloud_meta,<sensor_id>,<vdd>,<ta>
 
 Send commands via serial (115200 baud) to configure the device:
 
+**Identification:**
+- `hello` - Send the `$HELLO` identification message again (it is otherwise sent only once at startup), so a host that connects later can read the model, serial number and firmware version
+
 **Thermal Map:**
 - `thrmap_on` - Enable full 32×24 thermal map output
 - `thrmap_off` - Disable thermal map output

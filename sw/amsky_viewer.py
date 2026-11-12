@@ -73,6 +73,18 @@ def parse_thrmap(line: str):
     return sensor_id, frame
 
 
+def parse_hello(line: str):
+    """$HELLO,<model>,<serial>,<fw_version>,<git_hash>,<git_branch> -> dict nebo None."""
+    s = line.strip()
+    if not s.startswith("$HELLO,"):
+        return None
+    parts = [p.strip() for p in s.split(",")]
+    if len(parts) < 3 or not parts[2]:
+        return None
+    keys = ("device_model", "serial_number", "fw_version", "git_hash", "git_branch")
+    return {k: v for k, v in zip(keys, parts[1:6]) if v}
+
+
 def parse_hygro(line: str):
     """$hygro,<temp>,<humidity>,<dew_point>"""
     line = line.strip()
@@ -440,8 +452,10 @@ def calculate_normalized_lux(ch0_full, ch1_ir, gain_str, integration_time_str):
 class HDF5Logger:
     """Třída pro logování dat do HDF5 souborů (hodinové dávky)."""
 
-    def __init__(self, device_id: str, base_path: Path = None):
+    def __init__(self, device_id: str, base_path: Path = None, device_info: dict = None):
         self.device_id = device_id
+        # Identifikace zařízení z $HELLO; ukládá se jako atributy kořene souboru.
+        self.device_info = dict(device_info or {})
         self.base_path = base_path or Path(".")
         self.base_path.mkdir(parents=True, exist_ok=True)
 
@@ -497,8 +511,24 @@ class HDF5Logger:
             self.current_file = h5py.File(filepath, "a")
             print(f"HDF5: otevřen soubor {filepath}")
             
+            self._write_device_info()
+
             # Vytvořit/otevřít skupiny a datasety
             self._init_datasets()
+
+    def _write_device_info(self):
+        """Zapíše identifikaci zařízení (sériové číslo, verzi FW…) do atributů souboru."""
+        if self.current_file is None:
+            return
+        for key, value in self.device_info.items():
+            self.current_file.attrs[key] = value
+
+    def set_device_info(self, info: dict):
+        """Nastaví identifikaci zařízení; platí i pro už otevřený soubor."""
+        self.device_info = dict(info or {})
+        if self.current_file is not None:
+            self._write_device_info()
+            self.current_file.flush()
     
     def _init_datasets(self):
         """Inicializuje nebo otevře datasety v aktuálním souboru."""
@@ -736,6 +766,7 @@ class HeadlessRunner:
         self.stats_interval = stats_interval
 
         self.line_buffer = ""
+        self.device_info = {}
         self.logger = None
         if enable_logging:
             if not HDF5_AVAILABLE:
@@ -777,6 +808,16 @@ class HeadlessRunner:
     def process_line(self, line: str):
         s = line.strip()
         if not s:
+            return
+
+        if s.startswith("$HELLO,"):
+            info = parse_hello(s)
+            if info is not None:
+                self.device_info = info
+                if self.logger:
+                    self.logger.set_device_info(info)
+                print(f"Zařízení: {info.get('device_model', '?')} SN {info['serial_number']} "
+                      f"FW {info.get('fw_version', '?')}", flush=True)
             return
 
         if s.startswith("$thrmap,"):
@@ -944,6 +985,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.debug = debug
         self.sqm_zp = sqm_zp
         self.line_buffer = ""
+        self.device_info = {}
         self.levels_initialized = False
 
         # Replay mode
@@ -965,7 +1007,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if self.logging_enabled:
             log_path = log_path or self.settings.value("log_path", ".")
-            self.logger = HDF5Logger(self.device_id, Path(log_path))
+            self.logger = HDF5Logger(self.device_id, Path(log_path), self.device_info)
             print(f"HDF5 logování aktivní: {self.device_id}")
         elif enable_logging and not HDF5_AVAILABLE:
             print("VAROVÁNÍ: h5py není dostupné, logování vypnuto")
@@ -1382,7 +1424,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 # Pokud je logování zapnuté, restartuj s novým nastavením
                 self.logger.close()
                 log_path = self.settings.value("log_path", ".")
-                self.logger = HDF5Logger(self.device_id, Path(log_path))
+                self.logger = HDF5Logger(self.device_id, Path(log_path), self.device_info)
         self._update_log_status()
     
     def toggle_calibrated(self, checked: bool):
@@ -1398,7 +1440,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         if checked and self.logger is None:
             log_path = self.settings.value("log_path", ".")
-            self.logger = HDF5Logger(self.device_id, Path(log_path))
+            self.logger = HDF5Logger(self.device_id, Path(log_path), self.device_info)
             self.logging_enabled = True
             print("HDF5 logování zapnuto")
         elif not checked and self.logger is not None:
@@ -1532,6 +1574,17 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # Aktualizuj timestamp
         self.current_data["timestamp"] = datetime.now().isoformat()
+
+        if s.startswith("$HELLO,"):
+            info = parse_hello(s)
+            if info is not None:
+                self.device_info = info
+                self.current_data["device"] = info
+                if self.logger:
+                    self.logger.set_device_info(info)
+                print(f"Zařízení: {info.get('device_model', '?')} SN {info['serial_number']} "
+                      f"FW {info.get('fw_version', '?')}")
+            return
 
         if s.startswith("$thrmap,"):
             result = parse_thrmap(s)
@@ -2050,8 +2103,11 @@ def main():
             print(f"Nelze otevřít port {args.port}: {e}", file=sys.stderr)
             sys.exit(1)
         try:
-            ser.write(b"thrmap_on\n")
+            # $HELLO (sériové číslo, verze FW) posílá firmware jen po startu;
+            # příkazem "hello" si ho vyžádáme i při pozdějším připojení.
+            ser.write(b"hello\nthrmap_on\n")
             if args.verbose:
+                print("> hello")
                 print("> thrmap_on")
         except serial.SerialException:
             pass
@@ -2086,8 +2142,9 @@ def main():
             print(f"Nelze otevřít port {args.port}: {e}")
             sys.exit(1)
         try:
-            ser.write(b"thrmap_on\n")
+            ser.write(b"hello\nthrmap_on\n")
             if args.debug:
+                print("> hello")
                 print("> thrmap_on")
         except serial.SerialException:
             pass

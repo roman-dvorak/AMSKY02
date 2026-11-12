@@ -24,6 +24,14 @@ export function DatasetView({ data, info = [], group }: Props) {
 
   const items = [
     ...info,
+    ...(data.device
+      ? [
+          {
+            label: 'Zařízení',
+            value: `${data.device.model || 'AMSKY'} · SN ${data.device.serial}${data.device.fwVersion ? ` · FW ${data.device.fwVersion}` : ''}`,
+          },
+        ]
+      : []),
     { label: 'Od', value: formatUtc(range.from) },
     { label: 'Do', value: formatUtc(range.to) },
     { label: 'Délka', value: formatDuration(range.from, range.to) },

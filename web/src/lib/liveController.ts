@@ -30,7 +30,8 @@ export class LiveController {
         this.error = null;
         this.session.addLog('info', 'Připojeno');
         // Mapa je po startu firmwaru vypnutá; zapíná se příkazem stejně jako v Python vieweru.
-        void this.send(this.thrmap ? 'thrmap_on' : 'thrmap_off');
+        // $HELLO odchází jen při startu firmwaru; po připojení si ho vyžádáme znovu.
+        void this.send('hello').then(() => this.send(this.thrmap ? 'thrmap_on' : 'thrmap_off'));
       } else if (state === 'disconnected') {
         if (this.source === 'serial') this.session.addLog('info', error ?? 'Odpojeno');
         this.source = null;
