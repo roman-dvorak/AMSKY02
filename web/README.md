@@ -71,7 +71,7 @@ proto přeposílá cestu `/meteo`, takže lokálně lze jako zdroj zadat
 
 ## Nasazení
 
-Workflow `.github/workflows/deploy-viewer.yml` při pushi do `main` (změny ve
+Workflow `.github/workflows/deploy-viewer.yml` při pushi do výchozí větve `AMSKY02C` (změny ve
 `web/`) spustí testy, build a nasadí `web/dist` na GitHub Pages. Jednorázově je
 potřeba:
 

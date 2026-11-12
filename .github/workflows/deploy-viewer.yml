@@ -4,8 +4,10 @@ name: Deploy web viewer to GitHub Pages
 # vlastní doména viewer.amsky.astrometers.eu (web/public/CNAME).
 on:
   push:
+    # Výchozí větev repozitáře; nasazovat smí jen větve povolené
+    # v prostředí github-pages (Settings → Environments).
     branches:
-      - main
+      - AMSKY02C
     paths:
       - 'web/**'
       - '.github/workflows/deploy-viewer.yml'
