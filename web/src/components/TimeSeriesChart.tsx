@@ -76,7 +76,7 @@ function cursorLine(cursor: number | null | undefined) {
     silent: true,
     symbol: 'none',
     animation: false,
-    lineStyle: { color: '#e8b849', width: 2, type: 'solid' },
+    lineStyle: { color: '#f0b849', width: 2, type: 'solid' },
     label: { show: false },
     data: [{ xAxis: cursor }],
   };
@@ -143,6 +143,8 @@ export function TimeSeriesChart({
   useEffect(() => {
     const chart = echarts.init(hostRef.current!);
     chartRef.current = chart;
+    // Nová instance grafu nemá žádné nastavení — další vykreslení ji postaví celou.
+    builtKey.current = Symbol('unbuilt');
     if (group) {
       chart.group = group;
       echarts.connect(group);
@@ -178,32 +180,52 @@ export function TimeSeriesChart({
         animation: false,
         // Všechny časy v aplikaci jsou UTC (stejně jako názvy hodinových souborů).
         useUTC: true,
-        title: { text: title, left: 0, top: 0, textStyle: { color: '#d8e6f5', fontSize: 14, fontWeight: 600 } },
+        title: { text: title, left: 0, top: 0, textStyle: { color: '#dfe7f3', fontSize: 14, fontWeight: 600 } },
         tooltip: {
           trigger: 'axis',
           axisPointer: { type: 'cross' },
+          backgroundColor: 'rgba(15, 22, 38, 0.95)',
+          borderColor: '#2c3a55',
+          textStyle: { color: '#e6ecf5', fontSize: 12 },
           valueFormatter: (value: unknown) => (typeof value === 'number' ? value.toFixed(2) : '—'),
         },
         toolbox: {
           right: 0,
           top: -4,
           itemSize: 14,
-          iconStyle: { borderColor: '#8aa0b8' },
+          iconStyle: { borderColor: '#8593ab' },
           emphasis: { iconStyle: { borderColor: '#e8f0fa' } },
           feature: {
-            dataZoom: { yAxisIndex: 'none', title: { zoom: 'Přiblížit výběrem', back: 'Zpět' } },
-            restore: { title: 'Obnovit' },
-            saveAsImage: { title: 'Uložit PNG', backgroundColor: '#101a28', name: title },
+            dataZoom: { yAxisIndex: 'none', title: { zoom: 'Zoom to selection', back: 'Undo zoom' } },
+            restore: { title: 'Reset' },
+            saveAsImage: { title: 'Save as PNG', backgroundColor: '#0f1626', name: title },
           },
         },
-        legend: { top: 26, left: 0, right: 0, type: 'scroll', icon: 'rect', itemWidth: 14, itemHeight: 3, textStyle: { color: '#9eb4cb' } },
+        legend: { top: 26, left: 0, right: 0, type: 'scroll', icon: 'rect', itemWidth: 14, itemHeight: 3, textStyle: { color: '#a9b6cc' } },
         grid: { left: 52, right: hasRight ? 52 : 16, top: 78, bottom: 56 },
         // Při průběžné aktualizaci se dataZoom neposílá, aby zůstalo přiblížení uživatele.
         ...(rebuild
           ? {
               dataZoom: [
                 { type: 'inside', xAxisIndex: 0, start: 0, end: 100 },
-                { type: 'slider', xAxisIndex: 0, height: 20, bottom: 10, start: 0, end: 100 },
+                {
+                  type: 'slider',
+                  xAxisIndex: 0,
+                  height: 18,
+                  bottom: 10,
+                  start: 0,
+                  end: 100,
+                  borderColor: '#1f2a40',
+                  backgroundColor: 'transparent',
+                  fillerColor: 'rgba(79, 127, 232, 0.16)',
+                  dataBackground: { lineStyle: { color: '#3b4c6e' }, areaStyle: { color: '#1c2944' } },
+                  selectedDataBackground: { lineStyle: { color: '#6491f2' }, areaStyle: { color: '#2a3f6b' } },
+                  handleStyle: { color: '#162036', borderColor: '#51607c' },
+                  moveHandleStyle: { color: '#2c3a55' },
+                  emphasis: { handleStyle: { borderColor: '#6491f2' }, moveHandleStyle: { color: '#3b4c6e' } },
+                  textStyle: { color: '#8593ab' },
+                  brushSelect: false,
+                },
               ],
             }
           : {}),
@@ -211,8 +233,8 @@ export function TimeSeriesChart({
           type: 'time',
           min: Number.isFinite(min) ? min - padding : undefined,
           max: Number.isFinite(max) ? max + padding : undefined,
-          axisLabel: { color: '#8aa0b8' },
-          axisLine: { lineStyle: { color: '#2d3f56' } },
+          axisLabel: { color: '#8593ab' },
+          axisLine: { lineStyle: { color: '#2c3a55' } },
         },
         yAxis: [
           {
@@ -223,9 +245,9 @@ export function TimeSeriesChart({
             inverse: options.invert,
             min: yMin ?? undefined,
             max: yMax ?? undefined,
-            nameTextStyle: { color: '#8aa0b8' },
-            axisLabel: { color: '#8aa0b8' },
-            splitLine: { lineStyle: { color: '#1f2d40' } },
+            nameTextStyle: { color: '#8593ab' },
+            axisLabel: { color: '#8593ab' },
+            splitLine: { lineStyle: { color: '#1a2438' } },
           },
           ...(hasRight
             ? [
@@ -234,8 +256,8 @@ export function TimeSeriesChart({
                   name: yRight ?? '',
                   position: 'right',
                   scale: true,
-                  nameTextStyle: { color: '#8aa0b8' },
-                  axisLabel: { color: '#8aa0b8' },
+                  nameTextStyle: { color: '#8593ab' },
+                  axisLabel: { color: '#8593ab' },
                   splitLine: { show: false },
                 },
               ]
@@ -282,40 +304,40 @@ export function TimeSeriesChart({
           aria-expanded={showOptions}
           onClick={() => setShowOptions((v) => !v)}
         >
-          {showOptions ? 'Skrýt možnosti' : customized ? 'Možnosti grafu •' : 'Možnosti grafu'}
+          {showOptions ? 'Hide options' : customized ? 'Chart options •' : 'Chart options'}
         </button>
         {showOptions && (
           <div className="chart-options">
-            <OptionalNumber label={`Osa ${yLeft} od`} value={options.yMin} onChange={(v) => set({ yMin: v })} />
-            <OptionalNumber label="do" value={options.yMax} onChange={(v) => set({ yMax: v })} />
+            <OptionalNumber label={`${yLeft} axis from`} value={options.yMin} onChange={(v) => set({ yMin: v })} />
+            <OptionalNumber label="to" value={options.yMax} onChange={(v) => set({ yMax: v })} />
             <label className="check">
               <input type="checkbox" checked={options.log} onChange={(e) => set({ log: e.target.checked })} />
-              Logaritmická
+              Logarithmic
             </label>
             <label className="check">
               <input type="checkbox" checked={options.invert} onChange={(e) => set({ invert: e.target.checked })} />
-              Obrácená
+              Inverted
             </label>
             <label>
-              Vyhlazení
+              Smoothing
               <select value={options.smooth} onChange={(e) => set({ smooth: Number(e.target.value) })}>
                 {SMOOTH_CHOICES.map((n) => (
                   <option key={n} value={n}>
-                    {n === 0 ? 'vypnuto' : `${n} vzorků`}
+                    {n === 0 ? 'off' : `${n} samples`}
                   </option>
                 ))}
               </select>
             </label>
             <label className="check">
               <input type="checkbox" checked={options.points} onChange={(e) => set({ points: e.target.checked })} />
-              Body
+              Points
             </label>
             <button type="button" onClick={() => setOptions(DEFAULT_OPTIONS)} disabled={!customized}>
-              Výchozí
+              Defaults
             </button>
-            {!rangeValid && <span className="chart-options-error">Horní mez musí být větší než dolní.</span>}
+            {!rangeValid && <span className="chart-options-error">The upper limit must be greater than the lower one.</span>}
             {options.log && options.yMin !== null && options.yMin <= 0 && (
-              <span className="chart-options-error">V logaritmickém měřítku musí být dolní mez kladná.</span>
+              <span className="chart-options-error">On a logarithmic scale the lower limit must be positive.</span>
             )}
           </div>
         )}

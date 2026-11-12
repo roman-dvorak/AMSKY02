@@ -26,7 +26,7 @@ const LIGHT_COLORS = [
 export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, group }: Props) {
   const charts = useMemo(() => {
     const cloud: SeriesConfig[] = data.clouds.map((c, i) => ({
-      name: `${c.name} střed`,
+      name: `${c.name} centre`,
       t: c.t,
       v: c.center,
       color: CLOUD_COLORS[i % CLOUD_COLORS.length],
@@ -35,8 +35,8 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
     }));
 
     const hygro: SeriesConfig[] = [
-      { name: 'teplota', t: data.hygro.t, v: data.hygro.temp, color: '#79c0ff' },
-      { name: 'vlhkost', t: data.hygro.t, v: data.hygro.hum, color: '#f2cc60', yAxisIndex: 1 },
+      { name: 'temperature', t: data.hygro.t, v: data.hygro.temp, color: '#79c0ff' },
+      { name: 'humidity', t: data.hygro.t, v: data.hygro.hum, color: '#f2cc60', yAxisIndex: 1 },
     ];
 
     const lux: SeriesConfig[] = [];
@@ -49,7 +49,7 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
       const label = data.lights.length > 1 ? `${light.name} ` : '';
       lux.push({ name: `${label}lux`, t: light.t, v: derived.luxAll, color: colorAll, lineWidth: 2 });
       if (derived.luxIr) lux.push({ name: `${label}IR lux`, t: light.t, v: derived.luxIr, color: colorIr, lineWidth: 2 });
-      lux.push({ name: `${label}vše raw`, t: light.t, v: light.full, color: colorAll, yAxisIndex: 1, lineWidth: 1, lineType: 'dotted' });
+      lux.push({ name: `${label}full raw`, t: light.t, v: light.full, color: colorAll, yAxisIndex: 1, lineWidth: 1, lineType: 'dotted' });
       lux.push({ name: `${label}IR raw`, t: light.t, v: light.ir, color: colorIr, yAxisIndex: 1, lineWidth: 1, lineType: 'dotted' });
       sqm.push({ name: `${label}SQM`, t: light.t, v: derived.sqmAll, color: colorAll, lineWidth: 2 });
       if (derived.sqmIr) sqm.push({ name: `${label}IR SQM`, t: light.t, v: derived.sqmIr, color: colorIr, lineWidth: 2 });
@@ -64,7 +64,7 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
     <section className="charts-grid">
       <TimeSeriesChart
         className="wide-chart"
-        title="Cloud — teplota středu zorného pole (UTC)"
+        title="Sky temperature — centre of the field of view (UTC)"
         yLeft="°C"
         series={charts.cloud}
         cursorTime={cursorTime}
@@ -72,7 +72,7 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
         group={group}
       />
       <TimeSeriesChart
-        title="Hygro — teplota a vlhkost"
+        title="Air temperature and humidity"
         yLeft="°C"
         yRight="%"
         series={charts.hygro}
@@ -81,7 +81,7 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
         group={group}
       />
       <TimeSeriesChart
-        title={charts.fromDevice ? 'Light — lux (hodnota ze zařízení)' : 'Light — lux (přepočet z raw)'}
+        title={charts.fromDevice ? 'Illuminance (device value)' : 'Illuminance (computed from raw counts)'}
         yLeft="lux"
         yRight="raw"
         series={charts.lux}
@@ -91,7 +91,7 @@ export function DatasetCharts({ data, cursorTime = null, resetKey, version = 0, 
       />
       <TimeSeriesChart
         className="wide-chart"
-        title={charts.fromDevice ? 'Light — SQM (hodnota ze zařízení)' : 'Light — SQM (přepočet z raw)'}
+        title={charts.fromDevice ? 'Sky brightness (device value)' : 'Sky brightness (computed from raw counts)'}
         yLeft="mag/arcsec²"
         series={charts.sqm}
         cursorTime={cursorTime}

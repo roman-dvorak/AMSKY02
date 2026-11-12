@@ -38,15 +38,15 @@ export class LiveController {
       if (state === 'connected') {
         this.source = 'serial';
         this.error = null;
-        this.session.addLog('info', 'Připojeno');
+        this.session.addLog('info', 'Connected');
         // Mapa je po startu firmwaru vypnutá; zapíná se příkazem stejně jako v Python vieweru.
         // $HELLO odchází jen při startu firmwaru; po připojení si ho vyžádáme znovu.
         void this.send('hello').then(() => this.send(this.thrmap ? 'thrmap_on' : 'thrmap_off'));
       } else if (state === 'disconnected') {
-        if (this.source === 'serial') this.session.addLog('info', error ?? 'Odpojeno');
+        if (this.source === 'serial') this.session.addLog('info', error ?? 'Disconnected');
         this.source = null;
       } else {
-        this.session.addLog('info', 'Připojuji…');
+        this.session.addLog('info', 'Connecting…');
       }
     },
   });
@@ -66,7 +66,7 @@ export class LiveController {
     this.source = 'api';
     this.apiUrl = url;
     this.state = 'connecting';
-    this.session.addLog('info', `Připojuji k API ${url}…`);
+    this.session.addLog('info', `Connecting to API ${url}…`);
 
     const poll = async (): Promise<void> => {
       let snapshot: unknown;
@@ -88,7 +88,7 @@ export class LiveController {
           this.source = null;
           this.apiUrl = null;
           this.state = 'disconnected';
-          this.session.addLog('info', 'Odpojeno');
+          this.session.addLog('info', 'Disconnected');
           return;
         }
         // Výpadek za běhu: zkoušíme dál, stav ukáže „bez dat“.
@@ -97,9 +97,9 @@ export class LiveController {
       } else {
         if (this.state === 'connecting') {
           this.state = 'connected';
-          this.session.addLog('info', 'Připojeno k API');
+          this.session.addLog('info', 'Connected to API');
         } else if (this.error) {
-          this.session.addLog('info', 'Spojení s API obnoveno');
+          this.session.addLog('info', 'API connection restored');
         }
         this.error = null;
         converter.toLines(snapshot).forEach((line) => this.session.ingestLine(line));
@@ -114,7 +114,7 @@ export class LiveController {
     this.error = null;
     this.source = 'demo';
     this.state = 'connected';
-    this.session.addLog('info', 'Simulátor spuštěn — data nejsou ze skutečného senzoru');
+    this.session.addLog('info', 'Simulator started — this is not data from a real sensor');
     demoHello().forEach((line) => this.session.ingestLine(line));
     const tick = () => demoTick(this.demoStep++, this.thrmap).forEach((line) => this.session.ingestLine(line));
     tick();
@@ -127,7 +127,7 @@ export class LiveController {
       this.demoTimer = null;
       this.source = null;
       this.state = 'disconnected';
-      this.session.addLog('info', 'Simulátor zastaven');
+      this.session.addLog('info', 'Simulator stopped');
       return;
     }
     if (this.source === 'api') {
@@ -137,7 +137,7 @@ export class LiveController {
       this.source = null;
       this.apiUrl = null;
       this.state = 'disconnected';
-      this.session.addLog('info', 'Odpojeno od API');
+      this.session.addLog('info', 'Disconnected from API');
       return;
     }
     await this.link.disconnect();
@@ -148,11 +148,11 @@ export class LiveController {
     if (!text) return;
     this.session.addLog('tx', `> ${text}`);
     if (this.source === 'demo') {
-      this.session.addLog('rx', '# simulátor příkazy neprovádí');
+      this.session.addLog('rx', '# the simulator does not execute commands');
       return;
     }
     if (this.source === 'api') {
-      this.session.addLog('info', 'Přes HTTP API nelze posílat příkazy — je jen pro čtení');
+      this.session.addLog('info', 'Commands cannot be sent over the HTTP API — it is read-only');
       return;
     }
     try {
@@ -167,7 +167,7 @@ export class LiveController {
     // U API o mapě rozhoduje viewer, který drží sériový port.
     if (this.source === 'api') return;
     if (this.state === 'connected') await this.send(enabled ? 'thrmap_on' : 'thrmap_off');
-    else this.session.addLog('info', `Teplotní mapa bude po připojení ${enabled ? 'zapnuta' : 'vypnuta'}`);
+    else this.session.addLog('info', `The thermal map will be turned ${enabled ? 'on' : 'off'} after connecting`);
   }
 }
 

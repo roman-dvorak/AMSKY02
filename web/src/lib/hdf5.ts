@@ -25,7 +25,7 @@ function loadApi(): Promise<{ h5: H5Api; fs: H5FS }> {
       const h5 = mod.default;
       const module = await h5.ready;
       const fs = (module as unknown as { FS?: H5FS }).FS;
-      if (!fs) throw new Error('h5wasm filesystem není dostupný');
+      if (!fs) throw new Error('h5wasm filesystem is not available');
       return { h5, fs };
     })();
     apiPromise.catch(() => (apiPromise = null));
@@ -173,7 +173,7 @@ export async function parseH5(filename: string, input: ArrayBuffer | Uint8Array)
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   // h5wasm u neplatného souboru nevyhodí výjimku při otevření, ale až
   // nesrozumitelně při čtení — proto kontrola předem.
-  if (!isHdf5(bytes)) throw new Error(`${filename}: soubor není platné HDF5`);
+  if (!isHdf5(bytes)) throw new Error(`${filename}: not a valid HDF5 file`);
   const { h5, fs } = await loadApi();
   const path = `/in_${++fileCounter}.h5`;
   fs.writeFile(path, bytes);

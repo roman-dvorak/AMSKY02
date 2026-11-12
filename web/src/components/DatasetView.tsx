@@ -20,21 +20,21 @@ export function DatasetView({ data, info = [], group }: Props) {
   useEffect(() => setCursor(null), [data]);
 
   const range = datasetTimeRange(data);
-  if (!range) return <div className="status-banner">Soubor neobsahuje žádná data.</div>;
+  if (!range) return <div className="status-banner">The file contains no data.</div>;
 
   const items = [
     ...info,
     ...(data.device
       ? [
           {
-            label: 'Zařízení',
+            label: 'Device',
             value: `${data.device.model || 'AMSKY'} · SN ${data.device.serial}${data.device.fwVersion ? ` · FW ${data.device.fwVersion}` : ''}`,
           },
         ]
       : []),
-    { label: 'Od', value: formatUtc(range.from) },
-    { label: 'Do', value: formatUtc(range.to) },
-    { label: 'Délka', value: formatDuration(range.from, range.to) },
+    { label: 'From', value: formatUtc(range.from) },
+    { label: 'To', value: formatUtc(range.to) },
+    { label: 'Duration', value: formatDuration(range.from, range.to) },
   ];
 
   return (
@@ -48,7 +48,7 @@ export function DatasetView({ data, info = [], group }: Props) {
         ))}
         {cursor !== null && (
           <div className="info-item">
-            <span className="info-label">Pozice</span>
+            <span className="info-label">Cursor</span>
             <span className="info-value cursor-highlight">{formatUtc(cursor)}</span>
           </div>
         )}
@@ -56,12 +56,12 @@ export function DatasetView({ data, info = [], group }: Props) {
 
       <DatasetCharts data={data} cursorTime={cursor} resetKey={data} group={group} />
 
-      <section className="sky-section">
-        <h2>Obloha — {data.skies.map((s) => s.name).join(' a ') || 'teplotní mapa'}</h2>
+      <section className="card sky-section">
+        <h2>Sky thermal map{data.skies.length > 0 ? ` — ${data.skies.map((s) => s.name).join(' and ')}` : ''}</h2>
         {data.skies.length > 0 ? (
           <SkyPlayer skies={data.skies} onTimeChange={setCursor} />
         ) : (
-          <div className="status-banner">Záznam neobsahuje teplotní mapy oblohy.</div>
+          <div className="status-banner">The recording contains no sky thermal maps.</div>
         )}
       </section>
     </>

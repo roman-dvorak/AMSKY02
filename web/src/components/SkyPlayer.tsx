@@ -100,14 +100,14 @@ export function SkyPlayer({ skies, onTimeChange }: Props) {
           rows: sky.rows,
           cols: sky.cols,
           pixels,
-          caption: `střed ${fmt(center)} · střed − senzor ${fmt(center - sky.temp[i])}`,
+          caption: `centre ${fmt(center)} · centre − sensor ${fmt(center - sky.temp[i])}`,
         };
       }),
     [skies, master, frameIndex, time],
   );
 
   if (master.frames.length === 0) {
-    return <div className="status-banner">Záznam neobsahuje teplotní mapy oblohy.</div>;
+    return <div className="status-banner">The recording contains no sky thermal maps.</div>;
   }
 
   return (
@@ -116,21 +116,21 @@ export function SkyPlayer({ skies, onTimeChange }: Props) {
       <SkyMap panels={panels} range={range} settings={settings} />
       <div className="controls">
         <button type="button" onClick={() => setIndex(Math.max(frameIndex - 1, 0))} disabled={frameIndex === 0}>
-          Předchozí
+          Previous
         </button>
-        <button type="button" onClick={() => setPlaying((p) => !p)}>
-          {playing ? 'Pauza' : 'Přehrát'}
+        <button type="button" className="primary" onClick={() => setPlaying((p) => !p)}>
+          {playing ? 'Pause' : 'Play'}
         </button>
         <button type="button" onClick={() => setIndex(Math.min(frameIndex + 1, maxIndex))} disabled={frameIndex >= maxIndex}>
-          Další
+          Next
         </button>
         <span className="hint">← →</span>
         <label className="slider-label">
-          Snímek {frameIndex + 1} / {maxIndex + 1}
+          Frame {frameIndex + 1} / {maxIndex + 1}
           <input type="range" min={0} max={maxIndex} value={frameIndex} onChange={(e) => setIndex(Number(e.target.value))} />
         </label>
         <label className="slider-label speed-label">
-          Rychlost {intervalMs} ms/snímek
+          Speed {intervalMs} ms/frame
           <input type="range" min={50} max={2000} step={50} value={intervalMs} onChange={(e) => setIntervalMs(Number(e.target.value))} />
         </label>
       </div>
@@ -139,7 +139,7 @@ export function SkyPlayer({ skies, onTimeChange }: Props) {
         onSettings={setSettings}
         range={range}
         auto={manualRange === null}
-        autoLabel="celý záznam"
+        autoLabel="whole recording"
         onRange={setManualRange}
         onAuto={() => setManualRange(null)}
       />

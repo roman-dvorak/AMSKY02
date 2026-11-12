@@ -21,6 +21,16 @@ const STALE_MS = 10_000;
 
 const isString = (value: unknown): value is string => typeof value === 'string';
 
+type SourceChoice = 'serial' | 'api' | 'demo';
+const isChoice = (value: unknown): value is SourceChoice => value === 'serial' || value === 'api' || value === 'demo';
+
+/** Zdroje živých dat — vždy je aktivní jen jeden, proto se vybírají jako přepínač. */
+const SOURCES: { id: SourceChoice; title: string; hint: string }[] = [
+  { id: 'serial', title: 'USB sensor', hint: 'Directly over the serial port' },
+  { id: 'api', title: 'Viewer API', hint: 'From a running amsky-viewer' },
+  { id: 'demo', title: 'Simulator', hint: 'Made-up data to try the app' },
+];
+
 function num(value: number | undefined, digits = 2): string {
   return value !== undefined && Number.isFinite(value) ? value.toFixed(digits) : '—';
 }
@@ -67,6 +77,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
   const [baud, setBaud] = useState(115200);
   const [apiUrl, setApiUrl] = useStoredState<string>('amsky.live.apiUrl', DEFAULT_API_URL, isString);
   const [apiUrlError, setApiUrlError] = useState<string | null>(null);
+  const [choice, setChoice] = useStoredState<SourceChoice>('amsky.live.source', serialSupported() ? 'serial' : 'api', isChoice);
   const [command, setCommand] = useState('');
   const [manualRange, setManualRange] = useState<ColorRange | null>(null);
   const [skySettings, setSkySettings] = useSkySettings();
@@ -98,6 +109,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
   const { latest, device, data } = session;
   const connected = live.state === 'connected';
   const supported = serialSupported();
+  const canSend = connected && live.source !== 'api';
   const stale = connected && session.lastMessageAt !== null && now - session.lastMessageAt > STALE_MS;
   const range = datasetTimeRange(data);
   const frameCount = data.skies.reduce((sum, s) => sum + s.frames.length, 0);
@@ -112,7 +124,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
         rows: frame.rows,
         cols: frame.cols,
         pixels: frame.pixels,
-        caption: `${formatClock(frame.time)} UTC · střed ${num(center)} °C`,
+        caption: `${formatClock(frame.time)} UTC · centre ${num(center)} °C`,
       };
     });
     // `version` sleduje změny mapy `latest.frames`, která se mění na místě.
@@ -141,7 +153,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
     try {
       download(await writeH5(data), recordingName());
     } catch (e) {
-      setExportError(`Záznam se nepodařilo uložit: ${e instanceof Error ? e.message : String(e)}`);
+      setExportError(`The recording could not be saved: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setExporting(false);
     }
@@ -154,19 +166,28 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
     setCommand('');
   };
 
-  const connectApi = (event: FormEvent) => {
+  const connect = (event: FormEvent) => {
     event.preventDefault();
-    let url: string;
-    try {
-      url = normalizeApiUrl(apiUrl);
-    } catch {
-      setApiUrlError(`Neplatná adresa API: ${apiUrl}`);
-      return;
-    }
     setApiUrlError(null);
-    setApiUrl(url);
-    void live.connectApi(url);
+    if (choice === 'serial') {
+      void live.connectSerial(baud);
+    } else if (choice === 'demo') {
+      live.startDemo();
+    } else {
+      let url: string;
+      try {
+        url = normalizeApiUrl(apiUrl);
+      } catch {
+        setApiUrlError(`Invalid API address: ${apiUrl}`);
+        return;
+      }
+      setApiUrl(url);
+      void live.connectApi(url);
+    }
   };
+
+  const sourceName = SOURCES.find((s) => s.id === live.source)?.title ?? '';
+  const silentFor = session.lastMessageAt !== null ? Math.round((now - session.lastMessageAt) / 1000) : 0;
 
   const lightChannels = Array.from(latest.light.keys()).sort((a, b) => a - b);
   const cloudIds = Array.from(latest.cloud.keys()).sort((a, b) => a - b);
@@ -174,82 +195,120 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
 
   return (
     <>
-      <section className="connect-bar">
-        <div className="connect-actions">
-          {connected || live.state === 'connecting' ? (
-            <button type="button" className="primary" onClick={() => void live.disconnect()}>
-              {live.source === 'demo' ? 'Zastavit simulátor' : live.source === 'api' ? 'Odpojit od API' : 'Odpojit'}
-            </button>
-          ) : (
-            <>
-              <button type="button" className="primary" onClick={() => void live.connectSerial(baud)} disabled={!supported}>
-                Připojit senzor…
-              </button>
-              <label className="inline-field">
-                Rychlost
-                <select value={baud} onChange={(e) => setBaud(Number(e.target.value))} disabled={!supported}>
-                  {BAUD_RATES.map((rate) => (
-                    <option key={rate} value={rate}>
-                      {rate} Bd
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <form className="api-connect" onSubmit={connectApi}>
-                <input
-                  type="text"
-                  value={apiUrl}
-                  onChange={(e) => setApiUrl(e.target.value)}
-                  placeholder={DEFAULT_API_URL}
-                  aria-label="Adresa HTTP API vieweru"
-                  title="Adresa HTTP API Python vieweru (amsky-viewer --api)"
-                  spellCheck={false}
-                />
-                <button type="submit">Připojit k API</button>
-              </form>
-              <button type="button" onClick={() => live.startDemo()}>
-                Simulátor
-              </button>
-            </>
-          )}
-        </div>
-
-        <div className="connect-status">
-          <span className={`dot ${connected ? (stale ? 'stale' : 'on') : live.state === 'connecting' ? 'stale' : ''}`} />
-          <span>
-            {live.state === 'connecting'
-              ? 'Připojuji…'
-              : !connected
-                ? 'Nepřipojeno'
-                : live.source === 'demo'
-                  ? 'Simulátor (nejde o skutečná data)'
+      {connected || live.state === 'connecting' ? (
+        <section className="card connection">
+          <div className="connection-state">
+            <span className={`dot ${connected && !stale ? 'on' : 'stale'}`} />
+            <div className="connection-text">
+              <strong>
+                {live.state === 'connecting' ? 'Connecting…' : stale ? `No data for ${silentFor} s` : 'Connected'}
+                {sourceName && <span className="connection-source"> · {sourceName}</span>}
+              </strong>
+              <span className="device">
+                {live.source === 'demo'
+                  ? 'Simulated values — not real measurements'
                   : live.source === 'api'
-                    ? stale
-                      ? `API ${live.apiUrl} — ${Math.round((now - session.lastMessageAt!) / 1000)} s bez dat`
-                      : `Připojeno k API ${live.apiUrl}`
-                  : stale
-                    ? `Připojeno — ${Math.round((now - session.lastMessageAt!) / 1000)} s bez dat`
-                    : 'Připojeno'}
-          </span>
-          {device && (
-            <span className="device">
-              {device.model} · SN {device.serial} · FW {device.fwVersion || '?'}
-              {device.gitHash ? ` (${device.gitHash})` : ''}
+                    ? live.apiUrl
+                    : !device
+                      ? 'Waiting for the device to identify itself…'
+                      : null}
+                {device && live.source === 'api' && ' · '}
+                {device &&
+                  live.source !== 'demo' &&
+                  `${device.model} · SN ${device.serial} · FW ${device.fwVersion || '?'}${device.gitHash ? ` (${device.gitHash})` : ''}`}
+              </span>
+            </div>
+          </div>
+          <button type="button" onClick={() => void live.disconnect()}>
+            {live.source === 'demo' ? 'Stop simulator' : 'Disconnect'}
+          </button>
+        </section>
+      ) : (
+        <section className="card source-card">
+          <div className="card-head">
+            <h2>Choose a data source</h2>
+            <span className="connection-idle">
+              <span className="dot" /> Not connected
             </span>
-          )}
-        </div>
-      </section>
-
-      {!supported && (
-        <div className="status-banner">
-          Tento prohlížeč neumí Web Serial, takže se k senzoru připojit nelze. Použijte Chrome, Edge nebo Operu na počítači
-          (Firefox a Safari sériový port nepodporují). Prohlížení logů a simulátor fungují všude.
-        </div>
+          </div>
+          <div className="choices" role="radiogroup" aria-label="Live data source">
+            {SOURCES.map((source) => (
+              <label key={source.id} className={`choice ${choice === source.id ? 'selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="live-source"
+                  value={source.id}
+                  checked={choice === source.id}
+                  onChange={() => {
+                    setChoice(source.id);
+                    setApiUrlError(null);
+                  }}
+                />
+                <span className="choice-mark" aria-hidden="true" />
+                <span className="choice-text">
+                  <span className="choice-title">{source.title}</span>
+                  <span className="choice-hint">{source.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <form className="source-setup" onSubmit={connect}>
+            {choice === 'serial' && (
+              <>
+                <p className="source-desc">
+                  Plug the sensor into this computer. The browser will ask which serial port to use.
+                  {!supported && (
+                    <span className="source-warning">
+                      {' '}
+                      This browser has no Web Serial support — use Chrome, Edge or Opera on a desktop computer (Firefox and
+                      Safari cannot open serial ports).
+                    </span>
+                  )}
+                </p>
+                <label className="inline-field">
+                  Baud rate
+                  <select value={baud} onChange={(e) => setBaud(Number(e.target.value))} disabled={!supported}>
+                    {BAUD_RATES.map((rate) => (
+                      <option key={rate} value={rate}>
+                        {rate}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            {choice === 'api' && (
+              <>
+                <p className="source-desc">
+                  Read-only view of a sensor that <code>amsky-viewer --api</code> is already logging. The serial port stays
+                  with the viewer.
+                </p>
+                <label className="inline-field grow">
+                  Address
+                  <input
+                    type="text"
+                    value={apiUrl}
+                    onChange={(e) => setApiUrl(e.target.value)}
+                    placeholder={DEFAULT_API_URL}
+                    spellCheck={false}
+                  />
+                </label>
+              </>
+            )}
+            {choice === 'demo' && (
+              <p className="source-desc">No hardware needed. The simulator produces plausible but made-up measurements.</p>
+            )}
+            <button type="submit" className="primary" disabled={choice === 'serial' && !supported}>
+              {choice === 'demo' ? 'Start simulator' : choice === 'serial' ? 'Connect…' : 'Connect'}
+            </button>
+          </form>
+        </section>
       )}
+
       {(apiUrlError ?? live.error) && <div className="error-banner">{apiUrlError ?? live.error}</div>}
-      {connected && session.messageCount === 0 && now - (session.log[0]?.time ?? now) > 5000 && (
+      {connected && live.source === 'serial' && session.messageCount === 0 && now - (session.log[0]?.time ?? now) > 5000 && (
         <div className="status-banner">
-          Port je otevřený, ale nepřicházejí žádná data. Zkontrolujte, že je vybraný správný port a rychlost.
+          The port is open but no data is arriving. Check that the right port and baud rate are selected.
         </div>
       )}
 
@@ -259,7 +318,7 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
           return (
             <Tile
               key={`sqm${ch}`}
-              label={lightChannels.length > 1 ? `Jas oblohy · light${ch}` : 'Jas oblohy'}
+              label={lightChannels.length > 1 ? `Sky brightness · light${ch}` : 'Sky brightness'}
               value={l && l.sqm > 0 ? num(l.sqm) : '—'}
               unit="mag/arcsec²"
               detail={l ? `${l.lux.toPrecision(3)} lx · gain ${l.gain}× · ${l.integrationMs} ms` : undefined}
@@ -272,119 +331,127 @@ export function LiveView({ onOpenRecording }: { onOpenRecording(data: Dataset): 
           return (
             <Tile
               key={`cloud${id}`}
-              label={cloudIds.length > 1 ? `Teplota oblohy · cloud${id}` : 'Teplota oblohy'}
+              label={cloudIds.length > 1 ? `Sky temperature · cloud${id}` : 'Sky temperature'}
               value={num(c?.center)}
               unit="°C"
-              detail={delta !== undefined ? `${delta >= 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)} °C vůči okolí` : undefined}
+              detail={delta !== undefined ? `${delta >= 0 ? '+' : '−'}${Math.abs(delta).toFixed(1)} °C vs. ambient` : undefined}
             />
           );
         })}
-        <Tile label="Teplota vzduchu" value={num(hygro?.temperature)} unit="°C" />
-        <Tile label="Vlhkost" value={num(hygro?.humidity, 1)} unit="%" detail={hygro ? `rosný bod ${num(hygro.dewPoint, 1)} °C` : undefined} />
+        <Tile label="Air temperature" value={num(hygro?.temperature)} unit="°C" />
+        <Tile label="Humidity" value={num(hygro?.humidity, 1)} unit="%" detail={hygro ? `dew point ${num(hygro.dewPoint, 1)} °C` : undefined} />
       </section>
 
-      <section className="sky-section">
-        <div className="section-head">
-          <h2>Obloha — teplotní mapa</h2>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={live.thrmap}
-              disabled={live.source === 'api'}
-              onChange={(e) => void live.setThrmap(e.target.checked)}
-            />
-            Přijímat teplotní mapu
-          </label>
-        </div>
-        {panels.length > 0 ? (
-          <>
-            <SkyMap panels={panels} range={manualRange ?? autoRange} settings={skySettings} />
-            <SkyControls
-              settings={skySettings}
-              onSettings={setSkySettings}
-              range={manualRange ?? autoRange}
-              auto={manualRange === null}
-              autoLabel="podle aktuálního snímku"
-              onRange={setManualRange}
-              onAuto={() => setManualRange(null)}
-            />
-          </>
-        ) : (
-          <div className="status-banner">
-            {connected
-              ? live.thrmap
-                ? 'Čekám na první snímek teplotní mapy…'
-                : 'Příjem teplotní mapy je vypnutý.'
-              : 'Po připojení se zde zobrazí teplotní mapa oblohy z obou senzorů.'}
+      <div className="live-grid">
+        <section className="card sky-section">
+          <div className="card-head">
+            <h2>Sky thermal map</h2>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={live.thrmap}
+                disabled={live.source === 'api'}
+                onChange={(e) => void live.setThrmap(e.target.checked)}
+              />
+              Receive thermal map
+            </label>
           </div>
-        )}
-      </section>
+          {panels.length > 0 ? (
+            <>
+              <SkyMap panels={panels} range={manualRange ?? autoRange} settings={skySettings} />
+              <SkyControls
+                settings={skySettings}
+                onSettings={setSkySettings}
+                range={manualRange ?? autoRange}
+                auto={manualRange === null}
+                autoLabel="current frame"
+                onRange={setManualRange}
+                onAuto={() => setManualRange(null)}
+              />
+            </>
+          ) : (
+            <div className="empty">
+              {connected
+                ? live.thrmap
+                  ? 'Waiting for the first thermal map frame…'
+                  : 'Thermal map reception is turned off.'
+                : 'The sky thermal map from both sensors appears here once connected.'}
+            </div>
+          )}
+        </section>
 
-      <section className="record-bar">
-        <div>
-          <strong>Záznam od připojení</strong>
-          <span className="record-info">
-            {range
-              ? `${formatDuration(range.from, range.to)} · ${session.messageCount} zpráv · ${frameCount} snímků oblohy`
-              : 'zatím prázdný'}
-            {session.errorCount > 0 ? ` · ${session.errorCount} poškozených řádků` : ''}
-          </span>
+        <div className="live-side">
+          <section className="card recording">
+            <div className="card-head">
+              <h2>Session recording</h2>
+              <span className="record-info">
+                {range ? formatDuration(range.from, range.to) : 'empty'}
+              </span>
+            </div>
+            <p className="record-stats">
+              {range
+                ? `${session.messageCount} messages · ${frameCount} sky frames`
+                : 'Everything received since connecting is kept here.'}
+              {session.errorCount > 0 ? ` · ${session.errorCount} corrupted lines` : ''}
+            </p>
+            <div className="record-actions">
+              <button type="button" onClick={() => void exportH5()} disabled={!range || exporting}>
+                {exporting ? 'Saving…' : 'Download HDF5'}
+              </button>
+              <button type="button" onClick={() => onOpenRecording(snapshot(data, recordingName()))} disabled={!range}>
+                Browse recording
+              </button>
+              <button type="button" className="quiet" onClick={() => session.clear()} disabled={!range}>
+                Clear
+              </button>
+            </div>
+            {exportError && <div className="error-banner">{exportError}</div>}
+            <p className="note">
+              Kept only in this tab's memory — download it before closing the page. For long-term logging use{' '}
+              <code>amsky-viewer --headless --log</code>.
+            </p>
+          </section>
+
+          <section className="card console">
+            <div className="card-head">
+              <h2>Device console</h2>
+            </div>
+            <div className="console-log" ref={logRef}>
+              {logLength === 0 && <div className="console-empty">Device comments and sent commands appear here.</div>}
+              {session.log.map((line) => (
+                <div key={line.id} className={`console-line ${line.kind}`}>
+                  <span className="console-time">{formatClock(line.time)}</span>
+                  {line.text}
+                </div>
+              ))}
+            </div>
+            <div className="quick">
+              {QUICK_COMMANDS.map((cmd) => (
+                <button type="button" key={cmd} onClick={() => void live.send(cmd)} disabled={!canSend}>
+                  {cmd}
+                </button>
+              ))}
+            </div>
+            <form className="console-input" onSubmit={submitCommand}>
+              <input
+                type="text"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder={live.source === 'api' ? 'The API is read-only' : 'e.g. set sqm_offset 8.5265'}
+                aria-label="Command for the device"
+                disabled={!canSend}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <button type="submit" disabled={!canSend || !command.trim()}>
+                Send
+              </button>
+            </form>
+          </section>
         </div>
-        <div className="record-actions">
-          <button type="button" onClick={() => void exportH5()} disabled={!range || exporting}>
-            {exporting ? 'Ukládám…' : 'Stáhnout HDF5'}
-          </button>
-          <button type="button" onClick={() => onOpenRecording(snapshot(data, recordingName()))} disabled={!range}>
-            Procházet záznam
-          </button>
-          <button type="button" onClick={() => session.clear()} disabled={!range}>
-            Vymazat
-          </button>
-        </div>
-      </section>
-      {exportError && <div className="error-banner">{exportError}</div>}
-      <p className="note">
-        Záznam je jen v paměti této záložky — zavřením stránky zmizí, proto si ho stáhněte. Pro dlouhodobé logování použijte{' '}
-        <code>amsky-viewer --headless --log</code>.
-      </p>
+      </div>
 
       {range && <DatasetCharts data={data} resetKey={data} version={chartVersion} group="live" />}
-
-      <section className="console">
-        <div className="section-head">
-          <h2>Konzole zařízení</h2>
-          <div className="quick">
-            {QUICK_COMMANDS.map((cmd) => (
-              <button type="button" key={cmd} onClick={() => void live.send(cmd)} disabled={!connected}>
-                {cmd}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="console-log" ref={logRef}>
-          {logLength === 0 && <div className="console-empty">Zde se objeví komentáře zařízení a odeslané příkazy.</div>}
-          {session.log.map((line) => (
-            <div key={line.id} className={`console-line ${line.kind}`}>
-              <span className="console-time">{formatClock(line.time)}</span>
-              {line.text}
-            </div>
-          ))}
-        </div>
-        <form className="console-input" onSubmit={submitCommand}>
-          <input
-            type="text"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            placeholder="např. set sqm_offset 8.5265"
-            disabled={!connected}
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <button type="submit" disabled={!connected || !command.trim()}>
-            Odeslat
-          </button>
-        </form>
-      </section>
     </>
   );
 }

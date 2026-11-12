@@ -6,9 +6,9 @@ Běží celá v prohlížeči, nemá žádný backend. Produkční adresa:
 
 | Záložka | Co dělá |
 | --- | --- |
-| **Živě** | Připojí se k senzoru přes USB (Web Serial), ukazuje aktuální hodnoty, teplotní mapu oblohy z obou senzorů a grafy od připojení. Záznam lze stáhnout jako HDF5. Součástí je konzole pro příkazy (`config_show`, `set …`). Místo sériového portu umí číst i HTTP API Python vieweru (`amsky-viewer --api`, výchozí `http://localhost:8080/data.json`) — hodí se, když port drží logger. |
-| **Archiv** | Prohlíží hodinové HDF5 logy z adresáře na webu. Adresu adresáře zadává uživatel; naposledy použité zdroje se pamatují a dají se připnout. |
-| **Soubory** | Otevře HDF5 logy z disku (přetažením nebo výběrem). Soubory se nikam neodesílají. |
+| **Live** | Připojí se k senzoru přes USB (Web Serial), ukazuje aktuální hodnoty, teplotní mapu oblohy z obou senzorů a grafy od připojení. Záznam lze stáhnout jako HDF5. Součástí je konzole pro příkazy (`config_show`, `set …`). Místo sériového portu umí číst i HTTP API Python vieweru (`amsky-viewer --api`, výchozí `http://localhost:8080/data.json`) — hodí se, když port drží logger. |
+| **Archive** | Prohlíží hodinové HDF5 logy z adresáře na webu. Adresu adresáře zadává uživatel; naposledy použité zdroje se pamatují a dají se připnout. |
+| **Files** | Otevře HDF5 logy z disku (přetažením nebo výběrem). Soubory se nikam neodesílají. |
 
 ## Požadavky na prohlížeč
 
@@ -63,7 +63,7 @@ npm test           # jednotkové testy (vitest)
 npm run build      # typová kontrola + produkční build do dist/
 ```
 
-Bez hardwaru lze živý pohled vyzkoušet tlačítkem **Simulátor**.
+Bez hardwaru lze živý pohled vyzkoušet zdrojem **Simulator**.
 
 Archiv `space.astro.cz` povoluje CORS jen produkční doméně. Vývojový server
 proto přeposílá cestu `/meteo`, takže lokálně lze jako zdroj zadat
@@ -94,5 +94,5 @@ src/lib/hdf5.ts            čtení a zápis HDF5 (h5wasm, načítá se až při 
 src/lib/archive.ts         výpis adresáře, výběr dne/noci
 src/lib/sources.ts         zadané zdroje archivu (poslední, připnuté)
 src/lib/sky.ts             skládání map senzorů, palety, rozsah škály
-src/components/            pohledy Živě / Archiv / Soubory, grafy, mapa oblohy
+src/components/            pohledy Live / Archive / Files, grafy, mapa oblohy
 ```

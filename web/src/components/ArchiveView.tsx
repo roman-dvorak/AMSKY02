@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { defaultDateInput, fetchFile, filterFilesByDate, listSourceFiles } from '../lib/archive';
 import type { DayMode } from '../lib/dayMode';
-import { addDaysToDateKey, dateKeyToInput, inputToDateKey, periodDescription, periodLabel } from '../lib/dayMode';
+import { addDaysToDateKey, dateKeyToInput, inputToDateKey, parseFileTimestamp, periodDescription, periodLabel } from '../lib/dayMode';
 import { parseH5 } from '../lib/hdf5';
 import { mergeDatasets } from '../lib/merge';
 import type { ArchiveSource } from '../lib/sources';
@@ -11,8 +11,8 @@ import { readDate, readDayMode, readFiles, readSource, writeParams } from '../li
 import { DatasetView } from './DatasetView';
 
 const MODE_LABEL: Record<DayMode, string> = {
-  daytime: 'Daytime (půlnoc–půlnoc)',
-  night: 'Night (poledne–poledne)',
+  daytime: 'Day (midnight to midnight)',
+  night: 'Night (noon to noon)',
 };
 
 /** Naposledy rozparsované soubory, aby přepínání výběru nestahovalo znovu. */
@@ -29,7 +29,7 @@ async function loadEntry(entry: H5FileEntry): Promise<Dataset> {
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : 'Neočekávaná chyba při načítání dat.';
+  return error instanceof Error ? error.message : 'Unexpected error while loading data.';
 }
 
 /** Výběr zdroje: zadání adresy a seznam připnutých a naposledy použitých. */
@@ -75,8 +75,8 @@ function SourcePicker({
                 type="button"
                 className={`icon-btn ${source.pinned ? 'active' : ''}`}
                 onClick={() => onPin(source.url, !source.pinned)}
-                title={source.pinned ? 'Odepnout' : 'Připnout'}
-                aria-label={source.pinned ? `Odepnout ${source.url}` : `Připnout ${source.url}`}
+                title={source.pinned ? 'Unpin' : 'Pin'}
+                aria-label={source.pinned ? `Unpin ${source.url}` : `Pin ${source.url}`}
                 aria-pressed={source.pinned}
               >
                 {source.pinned ? '★' : '☆'}
@@ -85,8 +85,8 @@ function SourcePicker({
                 type="button"
                 className="icon-btn"
                 onClick={() => onRemove(source.url)}
-                title="Odebrat ze seznamu"
-                aria-label={`Odebrat ${source.url} ze seznamu`}
+                title="Remove from the list"
+                aria-label={`Remove ${source.url} from the list`}
               >
                 ✕
               </button>
@@ -97,10 +97,13 @@ function SourcePicker({
     );
 
   return (
-    <section className="source-picker">
+    <section className="card source-picker">
+      <div className="card-head">
+        <h2>Open an archive</h2>
+      </div>
       <form className="source-form" onSubmit={submit}>
         <label className="field grow">
-          <span className="label">Adresa adresáře s HDF5 logy</span>
+          <span className="label">Address of a directory with HDF5 logs</span>
           <input
             type="text"
             inputMode="url"
@@ -109,25 +112,25 @@ function SourcePicker({
               setInput(e.target.value);
               setInvalid(false);
             }}
-            placeholder="https://example.org/meteo/stanice/AMSKY02/"
+            placeholder="https://example.org/meteo/station/AMSKY02/"
             spellCheck={false}
             autoComplete="url"
             aria-invalid={invalid}
           />
         </label>
         <button type="submit" className="primary" disabled={!input.trim()}>
-          Otevřít
+          Open
         </button>
       </form>
-      {invalid && <div className="error-banner">Zadejte platnou adresu začínající http:// nebo https://.</div>}
+      {invalid && <div className="error-banner">Enter a valid address starting with http:// or https://.</div>}
       <p className="note">
-        Zadejte adresu složky, kde webový server vypisuje hodinové soubory <code>…_YYYYMMDD_HH.h5</code>. Server musí
-        povolit čtení z této stránky (CORS).
+        Enter the address of a folder where a web server lists hourly files <code>…_YYYYMMDD_HH.h5</code>. The server must
+        allow reading from this page (CORS).
       </p>
-      {group('Připnuté', pinned)}
-      {group('Naposledy použité', recent)}
+      {group('Pinned', pinned)}
+      {group('Recently used', recent)}
       {sources.length === 0 && (
-        <div className="status-banner">Zatím žádné zdroje. Po otevření se adresa uloží sem a půjde připnout.</div>
+        <div className="empty">No sources yet. Once opened, an address is remembered here and can be pinned.</div>
       )}
     </section>
   );
@@ -210,7 +213,7 @@ export function ArchiveView() {
         if (token !== listToken.current) return;
         setAllFiles(files);
         if (files.length === 0) {
-          setError('V zadaném adresáři nejsou žádné soubory .h5.');
+          setError('There are no .h5 files in that directory.');
           return;
         }
         // Zdroj se zapamatuje, až když se z něj opravdu podařilo číst.
@@ -284,7 +287,7 @@ export function ArchiveView() {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      setError('Nepodařilo se zkopírovat odkaz.');
+      setError('The link could not be copied.');
     }
   };
 
@@ -300,111 +303,132 @@ export function ArchiveView() {
   }
 
   const busy = loadingList || loadingFile;
-  const fileLabel = selected.length === 0 ? '—' : selected.length === 1 ? selected[0] : `${selected.length} souborů`;
+  const fileLabel = selected.length === 0 ? '—' : selected.length === 1 ? selected[0] : `${selected.length} files`;
   const saved = sources.find((s) => s.url === source);
   const hasFiles = allFiles.length > 0;
+  const multiSource = new Set(dayFiles.map((f) => f.source ?? '')).size > 1;
+
+  /** Hodinové soubory se nabízejí jako krátké štítky s hodinou; celé jméno je v nápovědě. */
+  const chipLabel = (file: H5FileEntry): string => {
+    const stamp = parseFileTimestamp(file.filename);
+    if (!stamp) return file.filename;
+    const hour = `${String(stamp.hour).padStart(2, '0')}:00`;
+    return multiSource && file.source ? `${file.source} ${hour}` : hour;
+  };
 
   return (
     <>
-      <section className="source-bar">
-        <div className="source-current">
-          <span className="label">Zdroj</span>
-          <span className="source-url">{source}</span>
-        </div>
-        <div className="source-actions">
-          {saved && (
-            <button
-              type="button"
-              className={saved.pinned ? 'active' : ''}
-              aria-pressed={saved.pinned}
-              onClick={() => setSources((list) => setPinned(list, source, !saved.pinned))}
-            >
-              {saved.pinned ? '★ Připnuto' : '☆ Připnout'}
+      <section className="card archive-bar">
+        <div className="source-bar">
+          <div className="source-current">
+            <span className="label">Source</span>
+            <span className="source-url">{source}</span>
+          </div>
+          <div className="source-actions">
+            {saved && (
+              <button
+                type="button"
+                className={saved.pinned ? 'active' : ''}
+                aria-pressed={saved.pinned}
+                onClick={() => setSources((list) => setPinned(list, source, !saved.pinned))}
+              >
+                {saved.pinned ? '★ Pinned' : '☆ Pin'}
+              </button>
+            )}
+            {hasFiles && (
+              <button type="button" onClick={() => void copyLink()}>
+                {linkCopied ? 'Link copied' : 'Copy link'}
+              </button>
+            )}
+            <button type="button" onClick={closeSource}>
+              Change source
             </button>
-          )}
-          {hasFiles && (
-            <button type="button" onClick={() => void copyLink()}>
-              {linkCopied ? 'Odkaz zkopírován' : 'Kopírovat odkaz'}
-            </button>
-          )}
-          <button type="button" onClick={closeSource}>
-            Změnit zdroj
-          </button>
+          </div>
         </div>
-      </section>
 
-      {hasFiles && (
-        <section className="selectors">
-          <div className="station-selector">
-            <label className="field">
-              <span className="label">Režim</span>
-              <select value={mode} onChange={(e) => changeMode(e.target.value as DayMode)} disabled={busy}>
-                <option value="daytime">{MODE_LABEL.daytime}</option>
-                <option value="night">{MODE_LABEL.night}</option>
-              </select>
-            </label>
+        {hasFiles && (
+          <div className="selectors">
+            <div className="field">
+              <span className="label">Period</span>
+              <div className="segmented" role="radiogroup" aria-label="Period">
+                {(['daytime', 'night'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === m}
+                    className={mode === m ? 'active' : ''}
+                    title={MODE_LABEL[m]}
+                    onClick={() => mode !== m && changeMode(m)}
+                    disabled={busy}
+                  >
+                    {m === 'daytime' ? 'Day' : 'Night'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="field">
               <span className="label">{periodLabel(mode)}</span>
               <span className="date-row">
-                <button type="button" onClick={() => shiftDate(-1)} disabled={busy || !date} aria-label="Předchozí den">
+                <button type="button" onClick={() => shiftDate(-1)} disabled={busy || !date} aria-label="Previous day">
                   ‹
                 </button>
                 <input type="date" value={date} onChange={(e) => changeDate(e.target.value)} disabled={busy} />
-                <button type="button" onClick={() => shiftDate(1)} disabled={busy || !date} aria-label="Následující den">
+                <button type="button" onClick={() => shiftDate(1)} disabled={busy || !date} aria-label="Next day">
                   ›
                 </button>
               </span>
             </label>
-          </div>
 
-          <div className="file-selector">
-            <div className="header">
-              <span className="label">HDF5 soubory</span>
-              <div className="actions">
-                <button
-                  type="button"
-                  onClick={() =>
-                    void selectFiles(
-                      dayFiles.map((f) => f.filename),
-                      dayFiles,
-                    )
-                  }
-                  disabled={busy || dayFiles.length === 0}
-                >
-                  Vše
-                </button>
-                <button type="button" onClick={() => void selectFiles([], dayFiles)} disabled={busy || selected.length === 0}>
-                  Žádný
-                </button>
+            <div className="field file-selector">
+              <div className="header">
+                <span className="label">
+                  Hourly files (UTC) · {selected.length} of {dayFiles.length} selected
+                </span>
+                <div className="actions">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void selectFiles(
+                        dayFiles.map((f) => f.filename),
+                        dayFiles,
+                      )
+                    }
+                    disabled={busy || dayFiles.length === 0}
+                  >
+                    All
+                  </button>
+                  <button type="button" onClick={() => void selectFiles([], dayFiles)} disabled={busy || selected.length === 0}>
+                    None
+                  </button>
+                </div>
+              </div>
+              <div className={`chips ${busy ? 'disabled' : ''}`}>
+                {dayFiles.map((file) => {
+                  const checked = selected.includes(file.filename);
+                  return (
+                    <label className={`chip ${checked ? 'selected' : ''}`} key={file.url} title={file.filename}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => toggleFile(file.filename, e.target.checked)}
+                        disabled={busy}
+                      />
+                      {chipLabel(file)}
+                    </label>
+                  );
+                })}
+                {dayFiles.length === 0 && <span className="hint">No files for this period.</span>}
               </div>
             </div>
-            <div className={`file-list ${busy ? 'disabled' : ''}`}>
-              {dayFiles.map((file) => (
-                <label className="file-item" key={file.url}>
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(file.filename)}
-                    onChange={(e) => toggleFile(file.filename, e.target.checked)}
-                    disabled={busy}
-                  />
-                  <span>
-                    {file.source && <span className="source">{file.source}/</span>}
-                    {file.filename}
-                  </span>
-                </label>
-              ))}
-            </div>
-            <span className="selection-count">
-              Vybráno: {selected.length} / {dayFiles.length}
-            </span>
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
-      {busy && <div className="status-banner">Načítám data…</div>}
+      {busy && <div className="status-banner">Loading data…</div>}
       {error && <div className="error-banner">{error}</div>}
       {!busy && !error && hasFiles && dayFiles.length === 0 && (
-        <div className="status-banner">Pro vybraný den nejsou dostupná žádná HDF5 data.</div>
+        <div className="status-banner">No HDF5 data is available for the selected day.</div>
       )}
 
       {data && (
@@ -412,9 +436,8 @@ export function ArchiveView() {
           group="archive"
           data={data}
           info={[
-            { label: 'Režim', value: MODE_LABEL[mode] },
-            { label: 'Období', value: periodDescription(mode, date) },
-            { label: 'Soubory', value: fileLabel },
+            { label: 'Period', value: periodDescription(mode, date) },
+            { label: 'Files', value: fileLabel },
           ]}
         />
       )}

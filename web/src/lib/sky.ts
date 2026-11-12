@@ -2,11 +2,11 @@ import type { SkyData } from './types';
 
 /** Barevné palety teplotní mapy; první je výchozí (stejná jako v původním prohlížeči). */
 export const PALETTES = {
-  thermal: { label: 'Termální', colors: ['#000000', '#6a0dad', '#dd0000', '#ff8c00', '#ffffff'] },
+  thermal: { label: 'Thermal', colors: ['#000000', '#6a0dad', '#dd0000', '#ff8c00', '#ffffff'] },
   inferno: { label: 'Inferno', colors: ['#000004', '#420a68', '#932667', '#dd513a', '#fca50a', '#fcffa4'] },
   viridis: { label: 'Viridis', colors: ['#440154', '#3b528b', '#21918c', '#5ec962', '#fde725'] },
-  coolwarm: { label: 'Modrá–červená', colors: ['#3b4cc0', '#8db0fe', '#dddddd', '#f4987a', '#b40426'] },
-  gray: { label: 'Šedá', colors: ['#000000', '#ffffff'] },
+  coolwarm: { label: 'Blue–red', colors: ['#3b4cc0', '#8db0fe', '#dddddd', '#f4987a', '#b40426'] },
+  gray: { label: 'Gray', colors: ['#000000', '#ffffff'] },
 } as const;
 
 export type PaletteName = keyof typeof PALETTES;

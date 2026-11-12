@@ -7,9 +7,9 @@ import type { View } from './lib/urlState';
 import { readView, writeParams } from './lib/urlState';
 
 const TABS: { id: View; label: string; subtitle: string }[] = [
-  { id: 'live', label: 'Živě', subtitle: 'Živá data ze senzoru připojeného přes USB' },
-  { id: 'archive', label: 'Archiv', subtitle: 'HDF5 logy z adresáře na webu' },
-  { id: 'files', label: 'Soubory', subtitle: 'HDF5 logy z vašeho disku' },
+  { id: 'live', label: 'Live', subtitle: 'Live data from a sensor' },
+  { id: 'archive', label: 'Archive', subtitle: 'HDF5 logs from a web directory' },
+  { id: 'files', label: 'Files', subtitle: 'HDF5 logs from your disk' },
 ];
 
 const ARCHIVE_PARAMS = { src: null, station: null, date: null, mode: null, files: null };
@@ -32,11 +32,20 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="top-bar">
-        <div className="title-block">
-          <h1>AMSKY Viewer</h1>
-          <p className="subtitle">{current.subtitle}</p>
+        <div className="brand">
+          <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="15" fill="#0f1626" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M5 21a11 11 0 0 1 22 0" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle cx="11" cy="12" r="1.3" fill="#f0b849" />
+            <circle cx="20" cy="8.5" r="1" fill="#f0b849" />
+            <circle cx="23" cy="15" r="0.9" fill="#f0b849" />
+          </svg>
+          <div className="title-block">
+            <h1>AMSKY Viewer</h1>
+            <p className="subtitle">{current.subtitle}</p>
+          </div>
         </div>
-        <nav className="tabs" aria-label="Zdroj dat">
+        <nav className="tabs" aria-label="Data source">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -72,8 +81,8 @@ export function App() {
 
       <footer className="footer">
         <a href="https://astrometers.eu/products/AMSKY02/">AMSKY02</a>
-        <a href="https://astrometers.eu/docs/AMSKY/">Dokumentace</a>
-        <a href="https://github.com/roman-dvorak/AMSKY02">Zdrojový kód</a>
+        <a href="https://astrometers.eu/docs/AMSKY/">Documentation</a>
+        <a href="https://github.com/roman-dvorak/AMSKY02">Source code</a>
       </footer>
     </div>
   );

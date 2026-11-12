@@ -20,7 +20,7 @@ export function FilesView({ data, onData }: Props) {
   const open = async (list: FileList | null) => {
     const files = Array.from(list ?? []).filter((f) => /\.(h5|hdf5)$/i.test(f.name));
     if (files.length === 0) {
-      if (list && list.length > 0) setError('Vyberte soubory s příponou .h5 nebo .hdf5.');
+      if (list && list.length > 0) setError('Choose files with the .h5 or .hdf5 extension.');
       return;
     }
     const current = ++token.current;
@@ -32,7 +32,7 @@ export function FilesView({ data, onData }: Props) {
       onData(mergeDatasets(parsed));
     } catch (e) {
       if (current !== token.current) return;
-      setError(e instanceof Error ? e.message : 'Soubor se nepodařilo načíst.');
+      setError(e instanceof Error ? e.message : 'The file could not be loaded.');
     } finally {
       if (current === token.current) setLoading(false);
     }
@@ -41,7 +41,7 @@ export function FilesView({ data, onData }: Props) {
   return (
     <>
       <section
-        className={`drop-zone ${dragging ? 'dragging' : ''}`}
+        className={`drop-zone ${dragging ? 'dragging' : ''} ${data ? 'compact' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -54,18 +54,19 @@ export function FilesView({ data, onData }: Props) {
         }}
       >
         <div>
-          <strong>Přetáhněte sem HDF5 logy</strong> nebo je vyberte z disku. Více souborů se spojí do jedné časové řady.
+          <strong>Drop HDF5 logs here</strong> or choose them from your disk. Several files are joined into one time series.
           <div className="hint">
-            Fungují logy z <code>amsky-viewer --log</code>, z této aplikace i starší logy AMSKY01.
+            Works with logs from <code>amsky-viewer --log</code>, recordings saved by this app and older AMSKY01 logs. Files are processed
+            in your browser and are not uploaded anywhere.
           </div>
         </div>
         <div className="drop-actions">
           <button type="button" className="primary" onClick={() => inputRef.current?.click()} disabled={loading}>
-            Vybrat soubory…
+            Choose files…
           </button>
           {data && (
             <button type="button" onClick={() => onData(null)} disabled={loading}>
-              Zavřít
+              Close
             </button>
           )}
         </div>
@@ -82,9 +83,9 @@ export function FilesView({ data, onData }: Props) {
         />
       </section>
 
-      {loading && <div className="status-banner">Načítám data…</div>}
+      {loading && <div className="status-banner">Loading data…</div>}
       {error && <div className="error-banner">{error}</div>}
-      {data && <DatasetView group="files" data={data} info={[{ label: 'Zdroj', value: data.label }]} />}
+      {data && <DatasetView group="files" data={data} info={[{ label: 'Source', value: data.label }]} />}
     </>
   );
 }

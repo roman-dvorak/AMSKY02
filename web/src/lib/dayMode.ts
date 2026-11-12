@@ -32,7 +32,7 @@ export function fileBelongsToPeriod(filename: string, selectedDateKey: string, m
 }
 
 export function periodLabel(mode: DayMode): string {
-  return mode === 'night' ? 'Noc (→ poledne)' : 'Den';
+  return mode === 'night' ? 'Night ending on' : 'Date';
 }
 
 export function periodDescription(mode: DayMode, dateInput: string): string {

@@ -43,10 +43,10 @@ async function fetchText(url: string, what: string): Promise<string> {
     response = await fetch(url, { cache: 'no-store' });
   } catch {
     throw new Error(
-      `Nelze načíst ${what}. Server není dostupný, nebo nepovoluje čtení z této stránky (chybí hlavička CORS).`,
+      `Cannot load ${what}. The server is unreachable or does not allow reading from this page (missing CORS header).`,
     );
   }
-  if (!response.ok) throw new Error(`Nelze načíst ${what} (${response.status})`);
+  if (!response.ok) throw new Error(`Cannot load ${what} (${response.status})`);
   return response.text();
 }
 
@@ -55,7 +55,7 @@ async function fetchText(url: string, what: string): Promise<string> {
  * podadresáře — lze tak zadat i adresář stanice s více zařízeními.
  */
 export async function listSourceFiles(sourceUrl: string): Promise<H5FileEntry[]> {
-  const html = await fetchText(sourceUrl, 'výpis adresáře');
+  const html = await fetchText(sourceUrl, 'the directory listing');
   const direct = parseApacheFiles(html, sourceUrl, '.h5');
   if (direct.length > 0) return direct.sort((a, b) => a.filename.localeCompare(b.filename));
 
@@ -76,7 +76,7 @@ export async function listSourceFiles(sourceUrl: string): Promise<H5FileEntry[]>
 
 export async function fetchFile(entry: H5FileEntry): Promise<ArrayBuffer> {
   const response = await fetch(entry.url, { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Nelze načíst soubor ${entry.filename} (${response.status})`);
+  if (!response.ok) throw new Error(`Cannot load file ${entry.filename} (${response.status})`);
   return response.arrayBuffer();
 }
 

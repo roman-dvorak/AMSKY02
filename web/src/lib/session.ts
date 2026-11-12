@@ -53,7 +53,7 @@ function trim(columns: unknown[][], limit: number): void {
 }
 
 export class LiveSession {
-  data: Dataset = emptyDataset('Živý záznam');
+  data: Dataset = emptyDataset('Live recording');
   latest: Latest = emptyLatest();
   device: HelloMsg | null = null;
   log: LogLine[] = [];
@@ -95,7 +95,7 @@ export class LiveSession {
 
   /** Smaže historii; identita zařízení zůstává (je to stále stejné připojení). */
   clear(): void {
-    this.data = emptyDataset('Živý záznam');
+    this.data = emptyDataset('Live recording');
     if (this.device) this.data.device = deviceInfo(this.device);
     this.latest = emptyLatest();
     this.messageCount = 0;

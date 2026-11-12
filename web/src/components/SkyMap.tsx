@@ -97,7 +97,7 @@ export function SkyMap({ panels, range, settings }: Props) {
             return (
               <span key={panel.label} className="sky-tag" style={style}>
                 {panel.label}
-                {panel.pixels ? '' : ' — bez dat'}
+                {panel.pixels ? '' : ' — no data'}
               </span>
             );
           })}
@@ -112,7 +112,7 @@ export function SkyMap({ panels, range, settings }: Props) {
             );
           })}
         </div>
-        <div className="sky-scale" aria-label="Barevná škála teploty">
+        <div className="sky-scale" aria-label="Temperature colour scale">
           <span>{range.max.toFixed(1)} °C</span>
           <div className="sky-scale-bar" style={{ background: gradient }} />
           <span>{range.min.toFixed(1)} °C</span>
@@ -121,11 +121,11 @@ export function SkyMap({ panels, range, settings }: Props) {
       <div className="sky-captions">
         {panels.map((panel) => (
           <span key={panel.label}>
-            <strong>{panel.label}</strong> {panel.caption ?? (panel.pixels ? '' : 'bez dat')}
+            <strong>{panel.label}</strong> {panel.caption ?? (panel.pixels ? '' : 'no data')}
           </span>
         ))}
       </div>
-      <div className="sky-hover">{hover ?? 'Najetím myší na mapu zobrazíte teplotu pixelu.'}</div>
+      <div className="sky-hover">{hover ?? 'Hover over the map to read a pixel temperature.'}</div>
     </div>
   );
 }
@@ -179,14 +179,14 @@ export function SkyControls({
   return (
     <div className="sky-controls">
       <label>
-        Uspořádání
+        Layout
         <select value={settings.layout} onChange={(e) => onSettings({ ...settings, layout: e.target.value as SkyLayout })}>
-          <option value="rotated">Otočené vedle sebe</option>
-          <option value="stacked">Nad sebou (sky1 nahoře)</option>
+          <option value="rotated">Rotated, side by side</option>
+          <option value="stacked">Stacked (sky1 on top)</option>
         </select>
       </label>
       <label>
-        Paleta
+        Palette
         <select value={settings.palette} onChange={(e) => onSettings({ ...settings, palette: e.target.value as PaletteName })}>
           {Object.entries(PALETTES).map(([name, palette]) => (
             <option key={name} value={name}>
@@ -196,13 +196,13 @@ export function SkyControls({
         </select>
       </label>
       <span className="sky-range">
-        <NumberField label="Škála od" value={range.min} onCommit={commit('min')} />
-        <NumberField label="do" value={range.max} onCommit={commit('max')} />
+        <NumberField label="Scale from" value={range.min} onCommit={commit('min')} />
+        <NumberField label="to" value={range.max} onCommit={commit('max')} />
         <span className="unit">°C</span>
       </span>
       <label className="check">
         <input type="checkbox" checked={auto} onChange={(e) => (e.target.checked ? onAuto() : onRange(range))} />
-        Automaticky ({autoLabel})
+        Auto ({autoLabel})
       </label>
     </div>
   );

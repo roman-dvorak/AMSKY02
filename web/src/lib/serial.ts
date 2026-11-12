@@ -54,7 +54,7 @@ export class SerialLink {
     try {
       await port.open({ baudRate });
     } catch (error) {
-      this.handlers.onState('disconnected', `Port nelze otevřít: ${message(error)}`);
+      this.handlers.onState('disconnected', `Cannot open the port: ${message(error)}`);
       return;
     }
     this.port = port;
@@ -82,7 +82,7 @@ export class SerialLink {
         }
       }
     } catch (error) {
-      if (!this.closing) failure = `Spojení přerušeno: ${message(error)}`;
+      if (!this.closing) failure = `Connection lost: ${message(error)}`;
     }
     try {
       await port.close();
@@ -95,7 +95,7 @@ export class SerialLink {
 
   async send(command: string): Promise<void> {
     const writable = this.port?.writable;
-    if (!writable) throw new Error('Zařízení není připojeno');
+    if (!writable) throw new Error('The device is not connected');
     const writer = writable.getWriter();
     try {
       await writer.write(this.encoder.encode(`${command}\n`));

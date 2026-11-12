@@ -110,7 +110,7 @@ export function describeApiError(url: string, error: unknown, pageProtocol: stri
   }
   const local = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
   if (pageProtocol === 'https:' && url.startsWith('http://') && !local) {
-    return `API na ${url} není dostupné (${reason}). Stránka běží přes HTTPS a prohlížeč z ní nepustí dotaz na nešifrovanou adresu jinou než localhost — spusťte viewer na tomto počítači, nebo si port přesměrujte (např. ssh -L 8080:localhost:8080 …).`;
+    return `The API at ${url} is not reachable (${reason}). This page is served over HTTPS, so the browser only allows unencrypted requests to localhost — run the viewer on this computer, or forward the port (e.g. ssh -L 8080:localhost:8080 …).`;
   }
-  return `API na ${url} není dostupné (${reason}). Běží viewer s přepínačem --api?`;
+  return `The API at ${url} is not reachable (${reason}). Is the viewer running with the --api option?`;
 }

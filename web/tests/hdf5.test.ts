@@ -66,6 +66,6 @@ describe('HDF5 logs', () => {
   });
 
   it('rejects a file that is not HDF5', async () => {
-    await expect(parseH5('bad.h5', new Uint8Array([1, 2, 3, 4]))).rejects.toThrow(/není platné HDF5/);
+    await expect(parseH5('bad.h5', new Uint8Array([1, 2, 3, 4]))).rejects.toThrow(/not a valid HDF5 file/);
   });
 });
