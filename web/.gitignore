@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# Kořenový .gitignore ignoruje lib/ (Python); zdrojáky webu tam ale patří.
+!src/lib/
